@@ -1,0 +1,186 @@
+datetime,description,amount,transaction_type,payment_mode,category
+29-01-2024 00:47,Medical Store,2303.0,Debit,UPI - Google Pay,Health
+05-02-2024 23:06,Train Ticket,4517.0,Debit,UPI - PhonePe,Transport
+18-04-2024 01:01,Spotify Subscription,817.0,Debit,UPI - Google Pay,Entertainment
+09-05-2024 19:01,Train Ticket,4647.0,Debit,UPI - Google Pay,Transport
+15-06-2024 22:34,College Fees,3486.0,Debit,UPI - Google Pay,Education
+30-05-2024 08:51,Internet Bill,103.0,Debit,Cash,Utilities
+10-02-2024 22:27,Salary Credit,42298.0,Credit,UPI - Paytm,Income
+25-02-2024 10:06,Uber Ride,809.0,Debit,Debit Card,Transport
+01-04-2024 11:38,Cafe Coffee Day,2216.0,Debit,Cash,Food
+27-04-2024 17:07,Zomato Restaurant,3150.0,Debit,UPI - PhonePe,Food
+16-03-2024 20:39,Netflix Subscription,3012.0,Debit,Credit Card,Entertainment
+21-01-2024 07:55,Flipkart Order,877.0,Debit,Debit Card,Shopping
+26-04-2024 20:53,Amazon Purchase,3038.0,Debit,UPI - Google Pay,Shopping
+31-03-2024 06:42,Electronics Store,2237.0,Debit,Net Banking,Shopping
+14-06-2024 02:38,Hospital Visit,1451.0,Debit,Credit Card,Health
+03-03-2024 05:29,Books Purchase,3158.0,Debit,UPI - Paytm,Education
+15-01-2024 07:52,Online Course Fee,312.0,Debit,Cash,Education
+12-04-2024 08:04,Myntra Clothing,1778.0,Debit,Credit Card,Shopping
+21-03-2024 06:41,College Fees,4139.0,Debit,Debit Card,Education
+27-04-2024 04:16,Medical Store,1193.0,Debit,UPI - Google Pay,Health
+23-05-2024 17:16,Books Purchase,4838.0,Debit,Debit Card,Education
+12-04-2024 11:14,Spotify Subscription,1183.0,Debit,Credit Card,Entertainment
+24-01-2024 01:55,Gas Bill,948.0,Debit,UPI - Google Pay,Utilities
+10-02-2024 21:27,Medical Store,4935.0,Debit,UPI - PhonePe,Health
+07-04-2024 19:29,Electricity Bill,4384.0,Debit,UPI - Paytm,Utilities
+03-01-2024 21:46,Netflix Subscription,988.0,Debit,Net Banking,Entertainment
+09-03-2024 20:21,Netflix Subscription,963.0,Debit,UPI - Paytm,Entertainment
+10-02-2024 14:00,Mobile Recharge,2207.0,Debit,Credit Card,Utilities
+15-02-2024 16:58,Online Course Fee,921.0,Debit,Cash,Education
+17-03-2024 20:32,Medical Store,1679.0,Debit,UPI - Google Pay,Health
+11-02-2024 17:49,Electronics Store,4394.0,Debit,UPI - PhonePe,Shopping
+23-03-2024 15:01,Gym Membership,966.0,Debit,UPI - Paytm,Health
+19-03-2024 07:03,Freelance Payment,35785.0,Credit,Credit Card,Income
+22-01-2024 23:31,Local Restaurant,616.0,Debit,Cash,Food
+02-02-2024 04:42,Netflix Subscription,3943.0,Debit,Credit Card,Entertainment
+08-03-2024 16:55,Ola Cab,3516.0,Debit,UPI - Google Pay,Transport
+25-06-2024 06:45,Netflix Subscription,2603.0,Debit,Debit Card,Entertainment
+04-03-2024 07:04,Cafe Coffee Day,2819.0,Debit,UPI - PhonePe,Food
+21-05-2024 07:37,Spotify Subscription,1854.0,Debit,UPI - PhonePe,Entertainment
+10-06-2024 01:14,Local Restaurant,602.0,Debit,UPI - PhonePe,Food
+25-03-2024 02:32,Scholarship Credit,35597.0,Credit,UPI - Paytm,Income
+04-05-2024 06:34,Hospital Visit,1133.0,Debit,Net Banking,Health
+27-05-2024 15:15,Spotify Subscription,3924.0,Debit,Cash,Entertainment
+18-02-2024 03:06,Mobile Recharge,3581.0,Debit,UPI - Paytm,Utilities
+15-04-2024 14:55,Mobile Recharge,493.0,Debit,Net Banking,Utilities
+14-06-2024 03:03,Medical Store,3348.0,Debit,Net Banking,Health
+28-01-2024 07:12,Myntra Clothing,1608.0,Debit,Credit Card,Shopping
+05-02-2024 13:11,Internet Bill,2331.0,Debit,Debit Card,Utilities
+20-01-2024 14:51,Train Ticket,4558.0,Debit,UPI - PhonePe,Transport
+15-06-2024 17:53,Zomato Restaurant,170.0,Debit,UPI - PhonePe,Food
+01-03-2024 05:26,Online Course Fee,4028.0,Debit,Debit Card,Education
+12-04-2024 01:10,City Bus Ticket,3154.0,Debit,UPI - PhonePe,Transport
+08-03-2024 14:18,Electricity Bill,3515.0,Debit,Net Banking,Utilities
+22-05-2024 21:45,Books Purchase,4036.0,Debit,UPI - Google Pay,Education
+16-03-2024 06:03,City Bus Ticket,4794.0,Debit,Net Banking,Transport
+16-01-2024 23:20,Netflix Subscription,518.0,Debit,UPI - PhonePe,Entertainment
+02-05-2024 16:58,Spotify Subscription,4400.0,Debit,UPI - Google Pay,Entertainment
+10-05-2024 02:54,Zomato Restaurant,1572.0,Debit,UPI - PhonePe,Food
+18-01-2024 21:55,Gym Membership,1976.0,Debit,Debit Card,Health
+25-05-2024 07:37,Cafe Coffee Day,4920.0,Debit,UPI - PhonePe,Food
+21-01-2024 13:42,Gym Membership,4831.0,Debit,Credit Card,Health
+21-03-2024 08:13,Movie Tickets,2623.0,Debit,UPI - Google Pay,Entertainment
+11-04-2024 04:42,Amazon Purchase,2507.0,Debit,Debit Card,Shopping
+19-01-2024 00:29,Myntra Clothing,4662.0,Debit,UPI - PhonePe,Shopping
+17-05-2024 06:32,Local Restaurant,2222.0,Debit,UPI - Google Pay,Food
+18-01-2024 07:23,Electronics Store,2384.0,Debit,UPI - Google Pay,Shopping
+19-05-2024 22:19,Internet Bill,4383.0,Debit,UPI - PhonePe,Utilities
+21-05-2024 09:59,Hospital Visit,898.0,Debit,UPI - Google Pay,Health
+30-01-2024 03:47,Amazon Purchase,4582.0,Debit,UPI - Google Pay,Shopping
+13-03-2024 19:13,Amazon Purchase,2858.0,Debit,UPI - Google Pay,Shopping
+11-06-2024 08:32,Hospital Visit,4052.0,Debit,UPI - Paytm,Health
+14-01-2024 02:40,Scholarship Credit,47759.0,Credit,Cash,Income
+12-01-2024 00:21,Amazon Purchase,1121.0,Debit,Net Banking,Shopping
+11-02-2024 23:28,Amazon Purchase,4569.0,Debit,Net Banking,Shopping
+23-05-2024 00:07,Mobile Recharge,666.0,Debit,Net Banking,Utilities
+19-05-2024 01:53,Uber Ride,3074.0,Debit,Credit Card,Transport
+07-02-2024 13:08,Netflix Subscription,392.0,Debit,UPI - Paytm,Entertainment
+11-01-2024 11:13,Electronics Store,2094.0,Debit,Net Banking,Shopping
+31-03-2024 17:56,Cafe Coffee Day,3379.0,Debit,Credit Card,Food
+09-02-2024 07:55,Books Purchase,1381.0,Debit,Cash,Education
+15-02-2024 13:01,Salary Credit,31754.0,Credit,Net Banking,Income
+15-04-2024 21:55,Myntra Clothing,2082.0,Debit,UPI - Paytm,Shopping
+26-02-2024 06:52,Gas Bill,3820.0,Debit,UPI - Paytm,Utilities
+28-02-2024 07:01,Flipkart Order,1632.0,Debit,Debit Card,Shopping
+12-03-2024 02:49,Myntra Clothing,2336.0,Debit,UPI - Paytm,Shopping
+10-05-2024 12:43,Medical Store,4442.0,Debit,UPI - Paytm,Health
+30-01-2024 08:11,Swiggy Order,4806.0,Debit,UPI - Paytm,Food
+28-01-2024 19:27,Zomato Restaurant,2881.0,Debit,Net Banking,Food
+21-03-2024 13:38,Salary Credit,53516.0,Credit,UPI - PhonePe,Income
+27-05-2024 06:16,Electricity Bill,413.0,Debit,Net Banking,Utilities
+01-01-2024 16:59,Mobile Recharge,4460.0,Debit,Net Banking,Utilities
+20-06-2024 06:23,Books Purchase,3583.0,Debit,UPI - PhonePe,Education
+25-03-2024 19:20,Hospital Visit,1070.0,Debit,Net Banking,Health
+09-05-2024 09:42,Flipkart Order,3395.0,Debit,UPI - Paytm,Shopping
+19-06-2024 12:43,Mobile Recharge,1475.0,Debit,Credit Card,Utilities
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+Not found Not found,Amazon Offer Sale,1999.0,Debit,UPI,Shopping
+Not found Not found,Amazon Offer Sale,1999.0,Debit,UPI,Shopping
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+Not found Not found,Amazon Offer Sale,1999.0,Debit,UPI,Shopping
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+Not found Not found,Amazon Offer Sale,1999.0,Debit,UPI,Shopping
+5 Dec 2025 12:45 PM,PRINCIPAL,200.0,Debit,UPI,Education
+31 Jul 2025 07:40 pm,DL DATTA SUDHAKAR LONDHE,100.0,Debit,UPI,Others
+19 Dec 2025 8:40 pm,Dasi Shrikant Shrinivas,20.0,Debit,UPI,Others
+31 Jul 2025 07:40 pm,DL DATTA SUDHAKAR LONDHE,100.0,Debit,UPI,Others
+3 Dec 2025 11:29 PM,HARSH BADGANCHI,160.0,Debit,UPI,Others
+31 Jul 2025 07:40 pm,DL DATTA SUDHAKAR LONDHE,100.0,Debit,UPI,Others
+3 Dec 2025 11:29 PM,HARSH BADGANCHI,160.0,Debit,UPI,Others
+Not found Not found,Amazon Offer Sale,1999.0,Debit,UPI,Shopping
+5 Dec 2025 12:45 PM,PRINCIPAL,2000.0,Debit,UPI,Education
+Not found Not found,Amazon Offer Sell,1999.0,Debit,UPI,Shopping
+17 Dec 2025 11:39 AM,Not found,15.0,Debit,UPI,Others
+2 Dec 2025 2:55 PM,VADAPAV JUNCTION,950.0,Debit,UPI,Food
+17 Dec 2025 11:39 AM,Not found,7586.0,Debit,UPI,Others
+Not found Not found,Not found,7586.46,Debit,UPI,Others
+Not found Not found,VADAPAV JUNCTION,7.21,Debit,UPI,Food
+Not found Not found,Not found,1999.0,Debit,UPI,Others
+Not found Not found,Not found,7586.46,Debit,UPI,Others
+Not found Not found,VADAPAV JUNCTION,7.21,Debit,UPI,Food
+Not found Not found,Not found,586.46,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+29-11-25 00:00,Unknown,2000.0,Debit,UPI,Others
+30-11-25 00:00,Unknown,596.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+29-11-25 00:00,Unknown,2000.0,Debit,UPI,Others
+30-11-25 00:00,Unknown,596.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+29-11-25 00:00,Unknown,2000.0,Debit,UPI,Others
+30-11-25 00:00,Unknown,596.0,Debit,UPI,Others
+13 Dec 2025 11:29PM,HARSH BADGANCHI,1204.0,Debit,UPI,Others
+31 Jul 2025 07:40 pm,DATTA SUDHAKAR LONDHE,100.0,Debit,UPI,Others
+Not found Not found,Not found,586.46,Debit,UPI,Others
+Not found Not found,Not found,586.46,Debit,UPI,Others
+Not found Not found,VADAPAV JUNCTION,950.0,Debit,UPI,Food
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+05-11-25 00:00,Unknown,200.0,Debit,UPI,Others
+15-11-25 00:00,Unknown,500.0,Debit,UPI,Others
+21-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+23-11-25 00:00,Unknown,7200.0,Debit,UPI,Others
+29-11-25 00:00,Unknown,2000.0,Debit,UPI,Others
+30-11-25 00:00,Unknown,596.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1200.0,Debit,UPI,Others
+02-11-25 00:00,Unknown,1100.0,Debit,UPI,Others
+28-12-2025 00:00,VADAPAV JUNCTION,95.0,Debit,UPI,Food

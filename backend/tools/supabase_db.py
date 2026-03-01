@@ -1,0 +1,185 @@
+import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Supabase client
+_supabase_client = None
+
+def get_supabase_client(user_token: str = None) -> Client:
+    """
+    Get Supabase client instance.
+    - If user_token is provided, create a per-request user-scoped client so RLS uses auth.uid().
+    - Otherwise return a cached backend client (service role key if available).
+    """
+    global _supabase_client
+
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+    supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+    
+    if not supabase_url or not supabase_anon_key:
+        raise ValueError(
+            "Missing Supabase credentials. Set SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_KEY) in .env."
+        )
+
+    # User-scoped client for RLS-protected queries
+    if user_token:
+        try:
+            user_client = create_client(supabase_url, supabase_anon_key)
+            user_client.postgrest.auth(user_token)
+            return user_client
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize user-scoped Supabase client: {str(e)}")
+
+    if _supabase_client:
+        return _supabase_client
+    
+    try:
+        _supabase_client = create_client(supabase_url, supabase_service_key)
+        return _supabase_client
+    except Exception as e:
+        print(f"CRITICAL ERROR: Failed to initialize Supabase client. Check your SUPABASE_URL and SUPABASE_KEY in .env file.")
+        print(f"Error details: {str(e)}")
+        # Raise a RuntimeError that can be caught by the caller or crash the app with a clear message
+        raise RuntimeError(f"Invalid Supabase Configuration: {str(e)}")
+
+# Database operations
+def save_transaction(user_id: str, transaction_data: dict, user_token: str = None) -> dict:
+    """Save transaction to Supabase"""
+    supabase = get_supabase_client(user_token)
+    
+    # Handle "Not found" values and set defaults
+    date_value = transaction_data.get("date")
+    if not date_value or date_value == "Not found":
+        from datetime import datetime
+        date_value = datetime.now().strftime('%Y-%m-%d')  # PostgreSQL date format
+    else:
+        # Convert DD-MM-YYYY to YYYY-MM-DD for PostgreSQL
+        try:
+            from datetime import datetime
+            date_obj = datetime.strptime(date_value, '%d-%m-%Y')
+            date_value = date_obj.strftime('%Y-%m-%d')
+        except ValueError:
+            # If conversion fails, use current date
+            from datetime import datetime
+            date_value = datetime.now().strftime('%Y-%m-%d')
+    
+    time_value = transaction_data.get("time", "00:00")
+    if time_value == "Not found":
+        time_value = "00:00"
+    
+    receiver_value = transaction_data.get("receiver")
+    if not receiver_value or receiver_value == "Not found":
+        receiver_value = "Unknown"
+    
+    sender_value = transaction_data.get("sender")
+    if not sender_value or sender_value == "Not found":
+        sender_value = "Self"
+    
+    transaction_id_value = transaction_data.get("transaction_id")
+    if not transaction_id_value or transaction_id_value == "Not found":
+        transaction_id_value = None
+    
+    # Prepare data for Supabase
+    try:
+        # Validate amount before converting to float
+        amount_value = transaction_data.get("amount", 0)
+        if amount_value is None or amount_value == "":
+            raise ValueError("Amount cannot be None or empty")
+        
+        # Convert to float and validate range
+        try:
+            import math
+            amount_float = float(amount_value)
+            
+            # Handle NaN and infinite values
+            if math.isnan(amount_float) or math.isinf(amount_float):
+                raise ValueError(f"Amount {amount_float} is NaN or infinite")
+                
+            if not (-1e10 <= amount_float <= 1e10):  # JSON safe range
+                raise ValueError(f"Amount {amount_float} is out of JSON safe range")
+                
+            # Skip zero or negative amounts for expense tracking
+            if amount_float <= 0:
+                raise ValueError(f"Amount {amount_float} must be positive for expense tracking")
+                
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid amount value: {amount_value}")
+        
+        db_data = {
+            "user_id": user_id,
+            "date": date_value,
+            "time": time_value,
+            "sender": sender_value,
+            "receiver": receiver_value,
+            "transaction_id": transaction_id_value,
+            "category": transaction_data.get("category"),
+            "amount": amount_float,
+            "ai_confidence": float(transaction_data.get("ai_confidence", 0.5)),
+            "corrected": transaction_data.get("corrected", False)
+        }
+        
+        result = supabase.table("transactions").insert(db_data).execute()
+        return result.data[0] if result.data else None
+        
+    except ValueError as e:
+        print(f"Validation error in save_transaction: {e}")
+        raise
+    except Exception as e:
+        print(f"Database error in save_transaction: {e}")
+        raise
+
+def get_user_transactions(user_id: str, user_token: str = None) -> list:
+    """Get all transactions for a user"""
+    print(f"DEBUG: Fetching transactions for user_id: {user_id}")
+    supabase = get_supabase_client(user_token)
+    
+    result = supabase.table("transactions").select("*").eq("user_id", user_id).order("date", desc=True).execute()
+    print(f"DEBUG: Query result: {result.data}")
+    
+    if not result.data:
+        print(f"DEBUG: No transactions found for user {user_id}")
+        return []
+    
+    # Convert dates back to DD-MM-YYYY format for frontend
+    transactions = []
+    for tx in result.data:
+        tx_copy = tx.copy()
+        if tx_copy.get("date"):
+            try:
+                from datetime import datetime
+                date_obj = datetime.strptime(tx_copy["date"], '%Y-%m-%d')
+                tx_copy["date"] = date_obj.strftime('%d-%m-%Y')
+            except ValueError:
+                pass  # Keep original if conversion fails
+        transactions.append(tx_copy)
+    
+    return transactions
+
+def delete_transaction(transaction_id: int, user_id: str, user_token: str = None) -> bool:
+    """Delete a transaction for a user"""
+    supabase = get_supabase_client(user_token)
+    
+    result = supabase.table("transactions").delete().eq("id", transaction_id).eq("user_id", user_id).execute()
+    return len(result.data) > 0 if result.data else False
+
+def verify_user_token(token: str) -> dict:
+    """Verify JWT token and get user info"""
+    # For development: bypass network issues with a fallback user
+    if token == "dev-token" or not token:
+        return {"id": "dev-user", "email": "dev@example.com"}
+    
+    supabase = get_supabase_client()
+    
+    try:
+        user = supabase.auth.get_user(token)
+        if user and user.user:
+            return user.user
+        return None
+    except Exception as e:
+        print(f"Token verification error: {e}")
+        # Do not silently fallback to a fake user for real tokens.
+        return None
