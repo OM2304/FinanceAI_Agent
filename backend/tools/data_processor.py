@@ -15,7 +15,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 BUDGET_FILE = os.path.join(DATA_DIR, "budget_limit.json")
 
-def load_and_clean_data(user_id: str) -> pd.DataFrame:
+def load_and_clean_data(user_id: str, user_token: Optional[str] = None) -> pd.DataFrame:
     """
     Loads transaction data from Supabase, cleans it, ensures correct data types,
     and returns a DataFrame.
@@ -32,7 +32,7 @@ def load_and_clean_data(user_id: str) -> pd.DataFrame:
 
     try:
         # 1. Load data from Supabase
-        transactions = get_user_transactions(user_id)
+        transactions = get_user_transactions(user_id, user_token)
         print(f"DEBUG: Raw transactions from Supabase: {len(transactions) if transactions else 0}")
         
         if not transactions:
@@ -168,7 +168,7 @@ def auto_categorize_ml(description: str) -> str:
 
 # backend/tools/data_processor.py
 
-def append_new_transaction(data: dict, user_id: str) -> bool:
+def append_new_transaction(data: dict, user_id: str, user_token: Optional[str] = None) -> bool:
     if not user_id:
         print("Error: No user_id provided")
         return False
@@ -197,7 +197,7 @@ def append_new_transaction(data: dict, user_id: str) -> bool:
             "corrected": data.get('corrected', False)
         }
         
-        return save_transaction(user_id, db_data)
+        return save_transaction(user_id, db_data, user_token)
     except Exception as e:
         print(f"Error: {e}")
         return False

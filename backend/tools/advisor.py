@@ -189,19 +189,19 @@ llm = get_llm()
 # 2. TOOLS GENERATOR
 # ==================================================================
 
-def create_tools(user_id: str):
+def create_tools(user_id: str, user_token: Optional[str] = None):
     """Creates a list of tools bound to the specific user_id."""
     
     @tool
     def budget_status_check(query: str) -> str:
         """Check spending against budget."""
-        df = load_and_clean_data(user_id)
+        df = load_and_clean_data(user_id, user_token)
         return json.dumps(calculate_budget_adherence(df), indent=2)
 
     @tool
     def spending_analytics_tool(query: str) -> str:
         """Category & merchant breakdown."""
-        df = load_and_clean_data(user_id)
+        df = load_and_clean_data(user_id, user_token)
         return json.dumps({
             "categories": get_spending_by_category(df),
             "top_merchants": get_top_n_merchants(df, n=5)
@@ -210,7 +210,7 @@ def create_tools(user_id: str):
     @tool
     def analyze_trends_tool(query: str) -> str:
         """Monthly spending trends."""
-        df = load_and_clean_data(user_id)
+        df = load_and_clean_data(user_id, user_token)
         return json.dumps(get_monthly_spending_trend(df), indent=2)
 
     @tool
@@ -333,12 +333,12 @@ def create_tools(user_id: str):
 # 3. COMPUTE METRICS & CONTEXT
 # ==================================================================
 
-def get_financial_context(user_id: str):
+def get_financial_context(user_id: str, user_token: Optional[str] = None):
     """
     Fetches user data from Supabase and computes metrics for the system prompt.
     """
     try:
-        df = load_and_clean_data(user_id)
+        df = load_and_clean_data(user_id, user_token)
     except Exception as e:
         print(f"DEBUG: Error in get_financial_context: {e}")
         # Return fallback context if data loading fails
@@ -460,9 +460,14 @@ def select_financial_principle(top_categories, savings_rate, liabilities, guru_p
 # 4. AGENT INTERFACE
 # ==================================================================
 
-def chat_with_advisor(user_input: str, user_id: str, guru_preference: Optional[str] = None) -> str:
+def chat_with_advisor(
+    user_input: str,
+    user_id: str,
+    guru_preference: Optional[str] = None,
+    user_token: Optional[str] = None
+) -> str:
     # 1. Get Context
-    context = get_financial_context(user_id)
+    context = get_financial_context(user_id, user_token)
     top_categories = context['top_categories']
     savings_rate = context['savings_rate']
     liabilities = context['liabilities']
@@ -530,7 +535,7 @@ def chat_with_advisor(user_input: str, user_id: str, guru_preference: Optional[s
     )
     
     # 4. Create Agent with User-Bound Tools
-    tools = create_tools(user_id)
+    tools = create_tools(user_id, user_token)
     advisor_agent = create_agent(
         model=llm,
         tools=tools,

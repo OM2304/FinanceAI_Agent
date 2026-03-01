@@ -87,7 +87,12 @@ async def chat(data: dict, current_user: dict = Depends(get_current_user)):
         guru_preference = data.get("guru_preference")
         if not msg:
             raise ValueError("Empty message")
-        response = chat_with_advisor(msg, current_user["id"], guru_preference=guru_preference)
+        response = chat_with_advisor(
+            msg,
+            current_user["id"],
+            guru_preference=guru_preference,
+            user_token=current_user.get("token")
+        )
         return {"response": response}
     except Exception as e:
         print(f"CHAT ERROR: {e}") # This prints the error in your terminal
