@@ -2,16 +2,22 @@ import cv2
 import requests
 import re
 import os
+from dotenv import load_dotenv
 
 from tools.llm_config import get_llm
 from tools.ml_categorizer import AdaptiveCategorizer
 
-OCR_SPACE_API_KEY = "K88959113288957"
+load_dotenv()
+OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
+
 llm = get_llm()
 ml_categorizer = AdaptiveCategorizer()
 
 # ---------------- OCR WITH PREPROCESSING ----------------
 def ocr_space(image_path):
+    if not OCR_SPACE_API_KEY:
+        raise RuntimeError("Missing OCR_SPACE_API_KEY in environment")
+
     img = cv2.imread(image_path)
     if img is None:
         return None

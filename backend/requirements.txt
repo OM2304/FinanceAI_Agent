@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-dotenv
+python-multipart
+pandas
+matplotlib
+supabase
+requests
+opencv-python
+pdfplumber
+pikepdf
+PyPDF2
+scikit-learn
+langchain
+langchain-google-genai
+langchain-openai

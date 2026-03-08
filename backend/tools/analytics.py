@@ -60,7 +60,7 @@ def get_monthly_spending_trend(df: pd.DataFrame) -> List[Dict[str, Union[str, in
     # Ensure datetime is index
     df = df.copy()
     df.set_index('datetime', inplace=True)
-    monthly_spending = df['amount'].resample('ME').sum().reset_index()
+    monthly_spending = df['amount'].resample('M').sum().reset_index()
     monthly_spending.rename(columns={'datetime': 'Month_Year', 'amount': 'Total_Spent_INR'}, inplace=True)
     monthly_spending['Month_Year'] = monthly_spending['Month_Year'].dt.strftime('%Y-%m')
     return monthly_spending.to_dict('records')
@@ -131,7 +131,7 @@ def get_spending_patterns(df: pd.DataFrame) -> Dict[str, Union[str, float, dict,
 
     # Month over month change (last two months)
     df_month = df.set_index("datetime").sort_index()
-    monthly = df_month["amount"].resample("ME").sum()
+    monthly = df_month["amount"].resample("M").sum()
     mom_change = None
     if len(monthly) >= 2:
         last = float(monthly.iloc[-1])
@@ -217,7 +217,7 @@ def build_budget_recommendations(df: pd.DataFrame, budget_limits: dict = None) -
 
     # Month-over-month increase
     df_month = df.set_index("datetime").sort_index()
-    monthly = df_month["amount"].resample("ME").sum()
+    monthly = df_month["amount"].resample("M").sum()
     if len(monthly) >= 2:
         last = float(monthly.iloc[-1])
         prev = float(monthly.iloc[-2])
@@ -331,8 +331,8 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         # Set datetime as index and sort
         df_line = df_line.set_index('datetime').sort_index()
         
-        # Resample to monthly data (ME = Month End)
-        monthly_data = df_line['amount'].resample('ME').sum()
+        # Resample to month-end compatible frequency
+        monthly_data = df_line['amount'].resample('M').sum()
         
         # Filter out dates that are clearly wrong (before 2000 or after 2100)
         monthly_data = monthly_data[
