@@ -1,1 +1,20 @@
-.env*
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python artifacts
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Node artifacts
+node_modules/
+frontend/node_modules/
+
+# Local/editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
