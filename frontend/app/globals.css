@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-border: rgba(226, 232, 240, 0.7);
+  --muted: #64748b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+[data-theme="dark"] {
+  --background: #0b0f14;
+  --foreground: #e2e8f0;
+  --card: #111827;
+  --card-border: rgba(51, 65, 85, 0.7);
+  --muted: #94a3b8;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), "Segoe UI", system-ui, -apple-system, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+}
+
+.app-bg {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(59, 130, 246, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #fff7ed 45%, #ffffff 100%);
+}
+
+[data-theme="dark"] .app-bg {
+  background:
+    radial-gradient(900px 500px at 10% -10%, rgba(56, 189, 248, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(34, 197, 94, 0.12), transparent 60%),
+    linear-gradient(180deg, #0b0f14 0%, #0f172a 55%, #0b0f14 100%);
+}
+
+/* Dark theme overrides for common Tailwind utility classes used in the UI */
+[data-theme="dark"] .bg-white,
+[data-theme="dark"] .bg-white\/70,
+[data-theme="dark"] .bg-white\/80,
+[data-theme="dark"] .bg-white\/85,
+[data-theme="dark"] .bg-white\/90 {
+  background-color: #0f172a !important;
+}
+
+[data-theme="dark"] .bg-slate-50,
+[data-theme="dark"] .bg-slate-50\/60,
+[data-theme="dark"] .bg-slate-50\/70 {
+  background-color: rgba(2, 6, 23, 0.55) !important;
+}
+
+[data-theme="dark"] .border-white\/60,
+[data-theme="dark"] .border-white\/70,
+[data-theme="dark"] .border-slate-200,
+[data-theme="dark"] .border-slate-200\/70,
+[data-theme="dark"] .border-slate-100 {
+  border-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+[data-theme="dark"] .text-slate-900,
+[data-theme="dark"] .text-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .text-slate-700,
+[data-theme="dark"] .text-slate-600,
+[data-theme="dark"] .text-slate-500,
+[data-theme="dark"] .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .shadow-slate-200\/60,
+[data-theme="dark"] .shadow-slate-200\/50 {
+  box-shadow: 0 14px 36px rgba(2, 6, 23, 0.6) !important;
+}
+
+/* Inputs in dark mode */
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  color: #e2e8f0 !important;
+  background-color: #0b1220 !important;
+  border-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+/* Fix input text color issues */
+input, textarea, select {
+  color: #171717 !important;
+  background-color: #ffffff !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #6b7280 !important;
+}
+
+/* Dark mode input fixes */
+@media (prefers-color-scheme: dark) {
+  input, textarea, select {
+    color: #ededed !important;
+    background-color: #1f2937 !important;
+  }
+  
+  input::placeholder, textarea::placeholder {
+    color: #9ca3af !important;
+  }
+}

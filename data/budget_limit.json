@@ -1,0 +1,13 @@
+{
+  "Food": 10000.0,
+  "Shopping": 2000.0,
+  "Health": 1000.0,
+  "Entertainment": 700.0,
+  "Other": 3000.0,
+  "Transport": 400.0,
+  "Utilities": 2000.0,
+  "Education": 10000.0,
+  "Others": 500.0,
+  "Bills": 2000.0,
+  "Investment": 500.0
+}

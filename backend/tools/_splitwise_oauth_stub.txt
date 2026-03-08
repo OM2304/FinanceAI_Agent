@@ -1,0 +1,8 @@
+from supabase import create_client
+import os
+from dotenv import load_dotenv
+
+# load env
+load_dotenv()
+
+# Existing functions ... appended below
