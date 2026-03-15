@@ -9,7 +9,10 @@ import { BudgetPanel } from './components/BudgetPanel';
 import { GuruLibrary } from './components/GuruLibrary';
 import { SplitwisePanel } from './components/SplitwisePanel';
 import { SpendingPatterns } from './components/SpendingPatterns';
+import WealthPanel from './components/WealthPanel';
+import TaxAdvisor from './components/TaxAdvisor';
 import { fetchExpenses } from '../lib/api';
+import { formatINR } from '../lib/formatters';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -90,7 +93,7 @@ export default function Home() {
           <div className="flex flex-col gap-6">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
               <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-400 via-rose-400 to-orange-500 shadow-lg shadow-orange-200/60 flex items-center justify-center text-white font-bold">
+                <div className="h-12 w-12 rounded-2xl bg-linear-to-br from-amber-400 via-rose-400 to-orange-500 shadow-lg shadow-orange-200/60 flex items-center justify-center text-white font-bold">
                   FM
                 </div>
                 <div>
@@ -108,7 +111,7 @@ export default function Home() {
                 </button>
                 <div className="bg-white/80 backdrop-blur border border-white/60 shadow-lg shadow-slate-200/60 rounded-2xl px-5 py-3">
                   <p className="text-xs uppercase tracking-wide text-slate-500">Total Spending</p>
-                  <p className="text-2xl font-semibold text-slate-900">INR {totalAmount.toFixed(2)}</p>
+                  <p className="text-2xl font-semibold text-slate-900">{formatINR(totalAmount)}</p>
                 </div>
                 <button
                   onClick={() => {
@@ -132,6 +135,8 @@ export default function Home() {
                   { key: 'budget', label: 'Budget' },
                   { key: 'library', label: 'Library' },
                   { key: 'splitwise', label: 'Splitwise' },
+                  { key: 'wealth', label: 'Wealth' },
+                  { key: 'tax', label: 'Tax' },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -227,7 +232,7 @@ export default function Home() {
                 <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Avg Transaction</p>
                 <div className="mt-4 flex items-end justify-between">
                   <div>
-                    <p className="text-3xl font-semibold text-slate-900">INR {avgAmount}</p>
+                    <p className="text-3xl font-semibold text-slate-900">{formatINR(avgAmount)}</p>
                     <p className="text-sm text-slate-500">Mean expense</p>
                   </div>
                   <div className="h-10 w-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center">
@@ -270,7 +275,7 @@ export default function Home() {
                   {expenses.length > 0 && (
                     <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-2xl border border-blue-100">
                       <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                      <p className="text-sm text-blue-800">Most recent: INR {expenses[0]?.amount} ({expenses[0]?.category})</p>
+                      <p className="text-sm text-blue-800">Most recent: {formatINR(expenses[0]?.amount)} ({expenses[0]?.category})</p>
                     </div>
                   )}
                   {expenses.length === 0 && (
@@ -375,6 +380,10 @@ export default function Home() {
             <SplitwisePanel />
           </section>
         )}
+
+        {activeTab === 'wealth' && <WealthPanel />}
+
+        {activeTab === 'tax' && <TaxAdvisor />}
       </div>
     </main>
   );

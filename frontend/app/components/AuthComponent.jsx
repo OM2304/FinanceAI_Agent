@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '../../lib/supabase/client.js'
 import { useRouter } from 'next/navigation'
 
 export function AuthComponent() {
@@ -10,7 +10,7 @@ export function AuthComponent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   
-  const supabase = createClientComponentClient()
+  const supabase = createClient()
   const router = useRouter()
 
   const handleAuth = async (e) => {

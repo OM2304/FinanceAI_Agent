@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Header
+from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Header, Query
 from tools.advisor import chat_with_advisor, process_statement_tool
 from tools.guru_content import ingest_guru_document, list_guru_documents
 from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token
@@ -6,6 +6,7 @@ from tools.analytics import refresh_analysis, calculate_budget_adherence, get_sp
 from tools.data_processor import load_and_clean_data, load_budget_limits, save_budget_limits
 from tools.splitwise_client import get_groups, get_expenses as splitwise_get_expenses, get_group, get_current_user as splitwise_current_user, build_authorize_url, exchange_code_for_token, create_expense
 from tools.splitwise_analytics import summarize_group_expenses
+from financial_engine import mf_api, calculators, advisor as wealth_advisor
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
@@ -15,6 +16,28 @@ import pandas as pd
 import re
 from pydantic import BaseModel
 from datetime import date, datetime
+from financial_engine import mf_api, calculators, advisor
+
+
+app = FastAPI()
+# Example endpoint to use the recommendation engine
+@app.get("/api/recommendation")
+async def get_recommendation(risk: str = Query(...), tax_regime: str = Query(...)):
+    recommendation = wealth_advisor.recommend_investment(risk, tax_regime)
+    elss_navs = await mf_api.get_elss_navs()
+    sip_navs = await mf_api.get_sip_navs()
+    
+    # Example calculations (adjust parameters as needed)
+    ppf_example = calculators.calculate_ppf(10000, 15)  # 10k annual deposit for 15 years
+    sip_example = calculators.calculate_sip(1000, 120, 0.12)  # 1k monthly for 10 years at 12% return
+    
+    return {
+        "recommendation": recommendation,
+        "elss_navs": elss_navs,
+        "sip_navs": sip_navs,
+        "ppf_example_maturity": ppf_example,
+        "sip_example_maturity": sip_example
+    }
 
 # Authentication model
 class AuthModel(BaseModel):
@@ -58,7 +81,7 @@ def get_current_user(authorization: str = Header(...)):
         return {"id": user.id, "email": user.email}
     return user
 
-app = FastAPI()
+
 
 # IMPORTANT: Create the folders if they don't exist
 os.makedirs("temp", exist_ok=True)
@@ -83,6 +106,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+def health():
+    env_ok = {
+        "SUPABASE_URL": bool(os.getenv("SUPABASE_URL")),
+        "SUPABASE_SERVICE_KEY": bool(os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")),
+        "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
+        "OCR_SPACE_API_KEY": bool(os.getenv("OCR_SPACE_API_KEY")),
+        "SPLITWISE_CLIENT_ID": bool(os.getenv("SPLITWISE_CLIENT_ID")),
+        "SPLITWISE_CLIENT_SECRET": bool(os.getenv("SPLITWISE_CLIENT_SECRET")),
+    }
+    paths_ok = {
+        "reports_dir": os.path.exists(REPORTS_DIR),
+        "temp_dir": os.path.exists(os.path.join(PROJECT_ROOT, "temp")),
+        "data_dir": os.path.exists(DATA_DIR),
+    }
+    return {"status": "ok", "env": env_ok, "paths": paths_ok}
 @app.post("/chat")
 async def chat(data: dict, current_user: dict = Depends(get_current_user)):
     try:
@@ -780,4 +819,51 @@ def splitwise_create_expense(data: dict, current_user: dict = Depends(get_curren
         raise
     except Exception as e:
         print(f"SPLITWISE CREATE EXPENSE ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/tax-saving-plan")
+async def tax_saving_plan(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate tax saving recommendations for the authenticated user."""
+    try:
+        annual_income = data.get("annual_income")
+        existing_80c = data.get("existing_80c", 0)
+        
+        if annual_income is None:
+            raise HTTPException(status_code=400, detail="annual_income is required")
+        
+        try:
+            annual_income = float(annual_income)
+            existing_80c = float(existing_80c)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid numeric values")
+        
+        from financial_engine.tax_advisor import get_recommendations
+        recommendation = get_recommendations(annual_income, existing_80c)
+        
+        from financial_engine.tax_advisor import IndiaTaxEngine
+        engine = IndiaTaxEngine()
+        tax_new = engine.calculate_new_regime_tax(annual_income)
+        tax_old = engine.calculate_old_regime_tax(annual_income, existing_80c, 0)
+        potential_savings = max(0, tax_old - tax_new)
+        investment_gap_80c = max(0, 150000 - existing_80c)
+        
+        suggestions = []
+        if investment_gap_80c > 0:
+            suggestions.append(f"Invest ₹{engine.format_inr(investment_gap_80c)} in ELSS or PPF under Section 80C")
+        suggestions.append("Consider NPS under Section 80CCD(1B) for additional ₹50,000 deduction")
+        if annual_income <= 1275000:
+            suggestions.append("You may qualify for Section 87A rebate in New Regime")
+        
+        return {
+            "recommendation": recommendation,
+            "tax_new_regime": tax_new,
+            "tax_old_regime": tax_old,
+            "potential_savings": potential_savings,
+            "investment_gap_80c": investment_gap_80c if investment_gap_80c > 0 else None,
+            "suggestions": suggestions
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"TAX SAVING PLAN ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))

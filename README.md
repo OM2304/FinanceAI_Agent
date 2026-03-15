@@ -1,6 +1,6 @@
 # Finance AI Agent
 
-AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics dashboards, AI advisor chat, budget controls, guru knowledge library, and Splitwise integration.
+AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics dashboards, AI advisor chat, budget controls, guru knowledge library, Splitwise integration, tax advisor, and wealth management.
 
 ## Tech Stack
 
@@ -9,7 +9,7 @@ AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics 
 - Database/Auth: Supabase (Postgres + Auth)
 - AI/ML: Google Gemini (advisor + enrichment), sklearn (adaptive categorization)
 - OCR/PDF: OCR.Space, OpenCV, pdfplumber, pikepdf, PyPDF2
-- External API: Splitwise API (OAuth + expenses)
+- External API: Splitwise API (OAuth + expenses), MF API (mutual funds)
 
 ## Implemented Features
 
@@ -106,8 +106,25 @@ AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics 
   - net balances
 - Create Splitwise expense from UI (equal split support)
 
+### 10. Tax Advisor
+
+- Tax saving plan recommendations based on annual income and existing 80C deductions
+- India tax calculations under new regime (FY 2025-26/2026-27)
+- Section 87A rebate considerations
+- Personalized tax-saving suggestions
+
+### 11. Wealth Management
+
+- Investment recommendations based on risk profile and tax regime
+- Mutual fund NAV fetching for ELSS and SIP schemes
+- Financial calculators:
+  - PPF (Public Provident Fund) maturity calculator
+  - SIP (Systematic Investment Plan) future value calculator
+- Wealth advice panel with risk assessment
+
 ## API Endpoints (Current)
 
+- `GET /api/recommendation`
 - `POST /chat`
 - `POST /upload`
 - `POST /transactions/confirm`
@@ -130,56 +147,108 @@ AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics 
 - `GET /splitwise/oauth/start`
 - `POST /splitwise/oauth/exchange`
 - `POST /splitwise/expenses`
+- `POST /api/tax-saving-plan`
 
 ## Current Project Structure
 
-```text
+```
 Financial_AI_Agent_W3_4/
-+-- backend/
-|   +-- main.py
-|   +-- .env.example
-|   \-- tools/
-|       +-- advisor.py
-|       +-- analytics.py
-|       +-- data_processor.py
-|       +-- guru_content.py
-|       +-- guru_logic.py
-|       +-- llm_config.py
-|       +-- ml_categorizer.py
-|       +-- ocr_processor.py
-|       +-- splitwise_analytics.py
-|       +-- splitwise_client.py
-|       +-- statement_processor.py
-|       \-- supabase_db.py
-+-- frontend/
-|   +-- app/
-|   |   +-- page.jsx
-|   |   +-- login/page.jsx
-|   |   +-- auth/callback/page.jsx
-|   |   +-- splitwise/callback/page.jsx
-|   |   \-- components/
-|   |       +-- AiAssistant.jsx
-|   |       +-- BackendCharts.jsx
-|   |       +-- BudgetPanel.jsx
-|   |       +-- GuruLibrary.jsx
-|   |       +-- SpendingPatterns.jsx
-|   |       +-- SplitwisePanel.jsx
-|   |       +-- TransactionConfirmationModal.jsx
-|   |       \-- UploadComponent.js
-|   +-- lib/
-|   |   +-- api.js
-|   |   \-- supabase/
-|   |       +-- client.js
-|   |       \-- server.js
-|   +-- middleware.js
-|   \-- .env.example
-+-- data/
-|   +-- budget_limit.json
-|   +-- demo_expense_dataset_100_records_with_payment_modes.csv
-|   +-- guru_data.py
-|   +-- guru_docs/
-|   \-- reports/
-\-- temp/
+├── README.md
+├── backend/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── __pycache__/
+│   ├── data/
+│   │   └── reports/
+│   ├── financial_engine/
+│   │   ├── __init__.py
+│   │   ├── advisor.py
+│   │   ├── calculators.py
+│   │   ├── mf_api.py
+│   │   ├── tax_advisor.py
+│   │   └── __pycache__/
+│   ├── temp/
+│   └── tools/
+│       ├── __init__.py
+│       ├── _splitwise_oauth_stub.txt
+│       ├── advisor.py
+│       ├── analytics.py
+│       ├── data_processor.py
+│       ├── guru_content.py
+│       ├── guru_logic.py
+│       ├── llm_config.py
+│       ├── ml_categorizer.py
+│       ├── ocr_processor.py
+│       ├── splitwise_analytics.py
+│       ├── splitwise_client.py
+│       ├── statement_processor.py
+│       ├── supabase_db.py
+│       ├── tempCodeRunnerFile.py
+│       └── __pycache__/
+├── data/
+│   ├── budget_limit.json
+│   ├── demo_expense_dataset_100_records_with_payment_modes.csv
+│   ├── guru_data.py
+│   ├── __pycache__/
+│   ├── guru_docs/
+│   │   ├── 022a6561-1a68-48ee-ad63-30a6a9c158dc/
+│   │   │   ├── index.json
+│   │   │   └── warren_buffett/
+│   │   │       └── warren_buffet_c437bf85-b5a7-4d37-94cc-5e15a4f3318d.chunks.json
+│   │   └── 9e52cb5e-38bb-41b0-9878-ab70e0b842e6/
+│   │       ├── index.json
+│   │       └── warren_buffett/
+│   │           └── warren_buffet_1986777e-0ad0-4d41-8075-1f53e89bb6ca.chunks.json
+│   └── reports/
+├── frontend/
+│   ├── eslint.config.mjs
+│   ├── jsconfig.json
+│   ├── middleware.js
+│   ├── next-env.d.ts
+│   ├── next.config.js
+│   ├── package.json
+│   ├── postcss.config.mjs
+│   ├── README.md
+│   ├── repomix-output.xml
+│   ├── tsconfig.json
+│   ├── app/
+│   │   ├── actions.js
+│   │   ├── globals.css
+│   │   ├── layout.jsx
+│   │   ├── page.jsx
+│   │   ├── auth/
+│   │   │   └── callback/
+│   │   │       └── page.jsx
+│   │   ├── components/
+│   │   │   ├── AiAssistant.jsx
+│   │   │   ├── AuthComponent.jsx
+│   │   │   ├── BackendCharts.jsx
+│   │   │   ├── BudgetPanel.jsx
+│   │   │   ├── DeleteButton.js
+│   │   │   ├── ExpenseChart.js
+│   │   │   ├── GuruLibrary.jsx
+│   │   │   ├── SpendingPatterns.jsx
+│   │   │   ├── SplitwisePanel.jsx
+│   │   │   ├── TaxAdvisor.jsx
+│   │   │   ├── TransactionConfirmationModal.jsx
+│   │   │   ├── UploadComponent.js
+│   │   │   └── WealthPanel.jsx
+│   │   ├── login/
+│   │   │   └── page.jsx
+│   │   └── splitwise/
+│   │       └── callback/
+│   │           └── page.jsx
+│   ├── lib/
+│   │   ├── api.js
+│   │   ├── formatters.js
+│   │   ├── index.js
+│   │   ├── supabaseClient.js
+│   │   └── supabase/
+│   │       ├── client.js
+│   │       └── server.js
+│   └── public/
+└── temp/
 ```
 
 ## Environment Variables
@@ -198,6 +267,14 @@ OCR_SPACE_API_KEY=your_ocr_space_api_key
 SPLITWISE_CLIENT_ID=your_splitwise_client_id
 SPLITWISE_CLIENT_SECRET=your_splitwise_client_secret
 # Optional fallback if you want static token mode
+```
+
+### Frontend (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
 SPLITWISE_ACCESS_TOKEN=your_splitwise_access_token
 ```
 

@@ -18,11 +18,13 @@ class AdaptiveCategorizer:
 
     def fetch_db_training_data(self):
         """Retrieves user-corrected transactions to improve accuracy"""
-        supabase = get_supabase_client()
-        # Fetching rows where user confirmed or corrected the category
-        response = supabase.table("transactions").select("receiver, category").execute()
-        db_records = [(r['receiver'], r['category']) for r in response.data]
-        return db_records
+        try:
+            supabase = get_supabase_client()
+            response = supabase.table("transactions").select("receiver, category").execute()
+            db_records = [(r['receiver'], r['category']) for r in response.data]
+            return db_records
+        except Exception:
+            return []
 
     def train_model(self):
         # Combine static demo data with dynamic DB data

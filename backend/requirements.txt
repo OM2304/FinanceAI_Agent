@@ -8,9 +8,11 @@ supabase
 requests
 opencv-python
 pdfplumber
+httpx
 pikepdf
 PyPDF2
 scikit-learn
 langchain
 langchain-google-genai
 langchain-openai
+httpx

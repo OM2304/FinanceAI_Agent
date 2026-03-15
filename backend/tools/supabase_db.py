@@ -15,11 +15,15 @@ def get_supabase_client() -> Client:
         return _supabase_client
         
     supabase_url = os.getenv("SUPABASE_URL")
-    # Prefer service role key for server-side operations (bypasses RLS safely on backend)
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+    supabase_key = (
+        os.getenv("SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+    )
     
     if not supabase_url or not supabase_key:
-        raise ValueError("Missing Supabase credentials. Please set SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY) in .env file.")
+        raise ValueError("Missing Supabase credentials. Please set SUPABASE_URL and one of SUPABASE_SERVICE_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_KEY, SUPABASE_ANON_KEY in .env file.")
     
     try:
         _supabase_client = create_client(supabase_url, supabase_key)
