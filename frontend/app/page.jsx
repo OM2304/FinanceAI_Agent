@@ -15,6 +15,9 @@ import { fetchExpenses } from '../lib/api';
 import { formatINR } from '../lib/formatters';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+const ExportDropdown = dynamic(() => import('./components/ExportDropdown'), { ssr: false });
 
 export default function Home() {
   const [expenses, setExpenses] = useState([]);
@@ -23,6 +26,9 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('overview');
   const [theme, setTheme] = useState('light');
   const router = useRouter();
+
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
 
   const loadExpenses = useCallback(async () => {
     try {
@@ -126,31 +132,121 @@ export default function Home() {
             </div>
 
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex flex-wrap gap-2">
-                {[
-                  { key: 'overview', label: 'Overview' },
-                  { key: 'upload', label: 'Upload' },
-                  { key: 'charts', label: 'Charts' },
-                  { key: 'assistant', label: 'Assistant' },
-                  { key: 'budget', label: 'Budget' },
-                  { key: 'library', label: 'Library' },
-                  { key: 'splitwise', label: 'Splitwise' },
-                  { key: 'wealth', label: 'Wealth' },
-                  { key: 'tax', label: 'Tax' },
-                ].map((tab) => (
+              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex items-center gap-2 relative z-40">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('overview')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                    activeTab === 'overview'
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                  }`}
+                >
+                  Overview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('charts')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                    activeTab === 'charts'
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                  }`}
+                >
+                  Charts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('assistant')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                    activeTab === 'assistant'
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                  }`}
+                >
+                  Assistant
+                </button>
+                <div
+                  className="relative"
+                  onMouseEnter={() => { setToolsOpen(true); setResourcesOpen(false); }}
+                  onMouseLeave={() => setToolsOpen(false)}
+                >
                   <button
-                    key={tab.key}
                     type="button"
-                    onClick={() => setActiveTab(tab.key)}
                     className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-                      activeTab === tab.key
+                      ['budget', 'splitwise', 'wealth'].includes(activeTab)
                         ? 'bg-slate-900 text-white shadow-md'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-white'
                     }`}
                   >
-                    {tab.label}
+                    Tools ▼
                   </button>
-                ))}
+                  {toolsOpen && (
+                    <div className="absolute top-full left-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 z-50">
+                      <button
+                        onClick={() => { setActiveTab('budget'); setToolsOpen(false); }}
+                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                      >
+                        Budget
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('splitwise'); setToolsOpen(false); }}
+                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                      >
+                        Splitwise
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('wealth'); setToolsOpen(false); }}
+                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                      >
+                        Wealth
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div
+                  className="relative"
+                  onMouseEnter={() => { setResourcesOpen(true); setToolsOpen(false); }}
+                  onMouseLeave={() => setResourcesOpen(false)}
+                >
+                  <button
+                    type="button"
+                    className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                      ['library', 'tax'].includes(activeTab)
+                        ? 'bg-slate-900 text-white shadow-md'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                    }`}
+                  >
+                    Resources ▼
+                  </button>
+                  {resourcesOpen && (
+                    <div className="absolute top-full left-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 z-50">
+                      <button
+                        onClick={() => { setActiveTab('library'); setResourcesOpen(false); }}
+                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                      >
+                        Library
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('tax'); setResourcesOpen(false); }}
+                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                      >
+                        Tax
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('upload')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ml-auto ${
+                    activeTab === 'upload'
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                  }`}
+                >
+                  <span className="text-lg mr-1">+</span> Upload
+                </button>
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -196,6 +292,10 @@ export default function Home() {
 
         {activeTab === 'overview' && (
           <>
+            <div className="flex justify-end mb-4">
+              {/* Export button top right */}
+              <ExportDropdown transactions={expenses} totalAmount={totalAmount} />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
                 <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Transactions</p>
