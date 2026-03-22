@@ -123,6 +123,28 @@ export async function fetchSpendingPatterns(token) {
   return res.json();
 }
 
+export async function fetchPredictiveInsights(
+  token,
+  { currentBalance = null, scenarioCategory = 'Transfer', scenarioPercentage = 20 } = {}
+) {
+  const params = new URLSearchParams();
+  if (currentBalance !== null && currentBalance !== undefined && String(currentBalance).trim() !== '') {
+    params.set('current_balance', String(currentBalance));
+  }
+  if (scenarioCategory) params.set('scenario_category', String(scenarioCategory));
+  if (scenarioPercentage !== null && scenarioPercentage !== undefined) {
+    params.set('scenario_percentage', String(scenarioPercentage));
+  }
+
+  const url = `${API_URL}/insights/predictive${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error('Unauthorized');
+  if (!res.ok) throw new Error('Failed to fetch predictive insights');
+  return res.json();
+}
+
 export async function uploadGuruDocument({ file, guru, title }, token) {
   const formData = new FormData();
   formData.append('file', file);

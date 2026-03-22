@@ -8,16 +8,63 @@ import { BackendCharts } from './components/BackendCharts';
 import { BudgetPanel } from './components/BudgetPanel';
 import { GuruLibrary } from './components/GuruLibrary';
 import { SplitwisePanel } from './components/SplitwisePanel';
-import { SpendingPatterns } from './components/SpendingPatterns';
+import AdvancedAnalytics from './components/AdvancedAnalytics';
 import WealthPanel from './components/WealthPanel';
 import TaxAdvisor from './components/TaxAdvisor';
 import { fetchExpenses } from '../lib/api';
 import { formatINR } from '../lib/formatters';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 
 const ExportDropdown = dynamic(() => import('./components/ExportDropdown'), { ssr: false });
+
+function parseTransactionDateTime(tx) {
+  const dateRaw = String(tx?.date ?? '').trim();
+  const timeRaw = String(tx?.time ?? '').trim();
+
+  if (!dateRaw) return null;
+
+  let year;
+  let month;
+  let day;
+  const parts = dateRaw.split('-').map((p) => p.trim());
+  if (parts.length === 3) {
+    // Supports YYYY-MM-DD and DD-MM-YYYY.
+    if (parts[0].length === 4) {
+      year = Number(parts[0]);
+      month = Number(parts[1]);
+      day = Number(parts[2]);
+    } else if (parts[2].length === 4) {
+      day = Number(parts[0]);
+      month = Number(parts[1]);
+      year = Number(parts[2]);
+    }
+  }
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    const parsed = new Date(dateRaw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    year = parsed.getFullYear();
+    month = parsed.getMonth() + 1;
+    day = parsed.getDate();
+  }
+
+  let hours = 0;
+  let minutes = 0;
+  if (timeRaw) {
+    const timeParts = timeRaw.split(':').map((p) => p.trim());
+    if (timeParts.length >= 2) {
+      const h = Number(timeParts[0]);
+      const m = Number(timeParts[1]);
+      hours = Number.isFinite(h) ? h : 0;
+      minutes = Number.isFinite(m) ? m : 0;
+    }
+  }
+
+  const asDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+  return Number.isNaN(asDate.getTime()) ? null : asDate;
+}
 
 export default function Home() {
   const [expenses, setExpenses] = useState([]);
@@ -77,6 +124,18 @@ export default function Home() {
     document.documentElement.setAttribute('data-theme', next);
   };
 
+  const sortedExpenses = useMemo(() => {
+    return (expenses ?? [])
+      .slice()
+      .sort((a, b) => {
+        const aDt = parseTransactionDateTime(a);
+        const bDt = parseTransactionDateTime(b);
+        const aTs = aDt ? aDt.getTime() : 0;
+        const bTs = bDt ? bDt.getTime() : 0;
+        return bTs - aTs;
+      });
+  }, [expenses]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center app-bg">
@@ -132,7 +191,7 @@ export default function Home() {
             </div>
 
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex items-center gap-2 relative z-40">
+              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex items-center gap-2 relative z-[9999]">
                 <button
                   type="button"
                   onClick={() => setActiveTab('overview')}
@@ -143,6 +202,17 @@ export default function Home() {
                   }`}
                 >
                   Overview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('advanced')}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+                    activeTab === 'advanced'
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                  }`}
+                >
+                  Advanced Analytics
                 </button>
                 <button
                   type="button"
@@ -182,25 +252,30 @@ export default function Home() {
                     Tools ▼
                   </button>
                   {toolsOpen && (
-                    <div className="absolute top-full left-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 z-50">
-                      <button
-                        onClick={() => { setActiveTab('budget'); setToolsOpen(false); }}
-                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                      >
-                        Budget
-                      </button>
-                      <button
-                        onClick={() => { setActiveTab('splitwise'); setToolsOpen(false); }}
-                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                      >
-                        Splitwise
-                      </button>
-                      <button
-                        onClick={() => { setActiveTab('wealth'); setToolsOpen(false); }}
-                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                      >
-                        Wealth
-                      </button>
+                    <div className="absolute left-0 top-full z-[9999] pt-2">
+                      <div className="bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => { setActiveTab('budget'); setToolsOpen(false); }}
+                          className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                        >
+                          Budget
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveTab('splitwise'); setToolsOpen(false); }}
+                          className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                        >
+                          Splitwise
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveTab('wealth'); setToolsOpen(false); }}
+                          className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                        >
+                          Wealth
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -220,19 +295,23 @@ export default function Home() {
                     Resources ▼
                   </button>
                   {resourcesOpen && (
-                    <div className="absolute top-full left-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 z-50">
-                      <button
-                        onClick={() => { setActiveTab('library'); setResourcesOpen(false); }}
-                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                      >
-                        Library
-                      </button>
-                      <button
-                        onClick={() => { setActiveTab('tax'); setResourcesOpen(false); }}
-                        className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
-                      >
-                        Tax
-                      </button>
+                    <div className="absolute left-0 top-full z-[9999] pt-2">
+                      <div className="bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => { setActiveTab('library'); setResourcesOpen(false); }}
+                          className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                        >
+                          Library
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveTab('tax'); setResourcesOpen(false); }}
+                          className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded"
+                        >
+                          Tax
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -294,7 +373,7 @@ export default function Home() {
           <>
             <div className="flex justify-end mb-4">
               {/* Export button top right */}
-              <ExportDropdown transactions={expenses} totalAmount={totalAmount} />
+              <ExportDropdown transactions={sortedExpenses} totalAmount={totalAmount} />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
@@ -375,7 +454,9 @@ export default function Home() {
                   {expenses.length > 0 && (
                     <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-2xl border border-blue-100">
                       <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                      <p className="text-sm text-blue-800">Most recent: {formatINR(expenses[0]?.amount)} ({expenses[0]?.category})</p>
+                      <p className="text-sm text-blue-800">
+                        Most recent: {formatINR(sortedExpenses[0]?.amount)} ({sortedExpenses[0]?.category})
+                      </p>
                     </div>
                   )}
                   {expenses.length === 0 && (
@@ -388,16 +469,12 @@ export default function Home() {
               </section>
             </div>
 
-            <div className="mb-8">
-              <SpendingPatterns />
-            </div>
-
             <section className="bg-white/90 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 overflow-hidden">
               <div className="p-6 border-b border-slate-200/70">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900">Recent Transactions</h2>
-                    <p className="text-sm text-slate-500">Latest activity across your accounts</p>
+                    <p className="text-sm text-slate-500">Last 5 entries (fast view)</p>
                   </div>
                   <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Updated</span>
                 </div>
@@ -416,7 +493,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-slate-100">
-                    {expenses.map((tx) => (
+                    {sortedExpenses.slice(0, 5).map((tx) => (
                       <tr key={tx.id} className="hover:bg-slate-50/60">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">{tx.date}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{tx.time}</td>
@@ -449,6 +526,12 @@ export default function Home() {
               </div>
             </section>
           </>
+        )}
+
+        {activeTab === 'advanced' && (
+          <section className="bg-white/40 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
+            <AdvancedAnalytics expenses={sortedExpenses} totalAmount={totalAmount} />
+          </section>
         )}
 
         {activeTab === 'charts' && (

@@ -118,9 +118,11 @@ export function SpendingPatterns() {
 
       <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Recurring Merchants</p>
-        {data.recurring_merchants && data.recurring_merchants.length > 0 ? (
+        {data.recurring_merchants && data.recurring_merchants.filter((m) => (m?.count ?? 0) >= 3).length > 0 ? (
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            {data.recurring_merchants.map((m) => (
+            {data.recurring_merchants
+              .filter((m) => (m?.count ?? 0) >= 3)
+              .map((m) => (
               <div key={m.name} className="flex items-center justify-between">
                 <span className="text-slate-700">{m.name}</span>
                 <span className="text-slate-900 font-semibold">{m.count} · {formatCurrency(m.total)}</span>

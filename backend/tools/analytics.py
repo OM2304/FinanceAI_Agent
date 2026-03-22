@@ -1,7 +1,10 @@
 import pandas as pd
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional, Any
 import json
 import os
+import calendar
+import math
+from datetime import date as date_cls
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -496,6 +499,339 @@ def refresh_analysis(user_id: str):
         print(f"📈 Analytics and Charts Refreshed for user {user_id}!")
         return True
     return False
+
+
+# ==================================================================
+# E. PREDICTIVE FINANCIAL ENGINE (Advanced Analytics)
+# ==================================================================
+
+def calculate_average_daily_burn_rate(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Average Daily Burn Rate (ADB) based on the current tracking period.
+
+    Tracking period = from min(txn date) to max(txn date), inclusive.
+    ADB = total_spent / period_days.
+    """
+    if df.empty:
+        return {
+            "status": "empty",
+            "period": {"start": None, "end": None, "days": 0},
+            "total_spent": 0.0,
+            "average_daily_burn_rate": 0.0,
+        }
+
+    df_local = df.copy()
+    date_only = df_local["datetime"].dt.date
+    date_min = date_only.min()
+    date_max = date_only.max()
+    period_days = max((date_max - date_min).days + 1, 1)
+    total_spent = float(df_local["amount"].sum())
+    adb = float(total_spent / period_days) if period_days else 0.0
+
+    return {
+        "status": "ok",
+        "period": {"start": str(date_min), "end": str(date_max), "days": int(period_days)},
+        "total_spent": round(total_spent, 2),
+        "average_daily_burn_rate": round(adb, 2),
+    }
+
+
+def calculate_runway(
+    current_balance: float,
+    df: Optional[pd.DataFrame] = None,
+    average_daily_burn_rate: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Runway (days) until balance reaches zero based on ADB.
+    runway_days = current_balance / average_daily_burn_rate
+    """
+    try:
+        balance = float(current_balance or 0)
+    except (TypeError, ValueError):
+        balance = 0.0
+
+    adb: float = 0.0
+    if average_daily_burn_rate is not None:
+        try:
+            adb = float(average_daily_burn_rate or 0)
+        except (TypeError, ValueError):
+            adb = 0.0
+    elif df is not None and not df.empty:
+        adb_calc = calculate_average_daily_burn_rate(df)
+        try:
+            adb = float(adb_calc.get("average_daily_burn_rate") or 0)
+        except (TypeError, ValueError):
+            adb = 0.0
+
+    if adb <= 0:
+        return {
+            "status": "ok",
+            "current_balance": round(balance, 2),
+            "average_daily_burn_rate": round(adb, 2),
+            "runway_days": None,
+        }
+
+    runway_days = balance / adb
+    return {
+        "status": "ok",
+        "current_balance": round(balance, 2),
+        "average_daily_burn_rate": round(adb, 2),
+        "runway_days": round(runway_days, 2),
+    }
+
+
+def _daily_spend_series(df: pd.DataFrame) -> pd.Series:
+    df_local = df.copy()
+    df_local["date_only"] = df_local["datetime"].dt.date
+    return df_local.groupby("date_only")["amount"].sum().sort_index()
+
+
+def forecast_next_week_sma(df: Optional[pd.DataFrame], window_days: int = 7) -> Dict[str, Any]:
+    """
+    Simple Moving Average (SMA) over daily totals for the last `window_days` days.
+    Predicts next week's (7-day) spending volume as: sma_daily * 7.
+    """
+    if df is None or df.empty:
+        return {
+            "status": "empty",
+            "window_days": int(window_days),
+            "daily_series": [],
+            "sma_daily": 0.0,
+            "forecast_next_7_days_total": 0.0,
+        }
+
+    daily = _daily_spend_series(df)
+    if daily.empty:
+        return {
+            "status": "empty",
+            "window_days": int(window_days),
+            "daily_series": [],
+            "sma_daily": 0.0,
+            "forecast_next_7_days_total": 0.0,
+        }
+
+    w = max(int(window_days), 1)
+    tail = daily.tail(w)
+    sma_daily = float(tail.mean()) if not tail.empty else 0.0
+    forecast_next_7 = sma_daily * 7.0
+
+    daily_series = [{"date": str(idx), "spent": round(float(val), 2)} for idx, val in tail.items()]
+
+    return {
+        "status": "ok",
+        "window_days": int(w),
+        "daily_series": daily_series,
+        "sma_daily": round(sma_daily, 2),
+        "forecast_next_7_days_total": round(forecast_next_7, 2),
+    }
+
+
+def predict_monthly_total(df: Optional[pd.DataFrame] = None, as_of: Optional[date_cls] = None) -> Dict[str, Any]:
+    """
+    Pro-rates month-to-date spending to an end-of-month estimate.
+
+    predicted_month_total = spent_mtd / day_of_month * days_in_month
+
+    If `as_of` is not provided, uses the latest transaction date in `df`
+    (or today's date if `df` is empty).
+    """
+    if df is None or df.empty:
+        ref = as_of or date_cls.today()
+        days_in_month = calendar.monthrange(ref.year, ref.month)[1]
+        return {
+            "status": "empty",
+            "as_of": str(ref),
+            "month_to_date_spent": 0.0,
+            "days_elapsed": int(ref.day),
+            "days_in_month": int(days_in_month),
+            "predicted_month_total": 0.0,
+        }
+
+    ref_date = as_of or df["datetime"].dt.date.max() or date_cls.today()
+    days_in_month = calendar.monthrange(ref_date.year, ref_date.month)[1]
+    days_elapsed = max(int(ref_date.day), 1)
+
+    df_local = df.copy()
+    in_month = (df_local["datetime"].dt.year == ref_date.year) & (df_local["datetime"].dt.month == ref_date.month)
+    spent_mtd = float(df_local.loc[in_month, "amount"].sum())
+
+    predicted_total = (spent_mtd / days_elapsed) * days_in_month if days_elapsed else 0.0
+
+    return {
+        "status": "ok",
+        "as_of": str(ref_date),
+        "month_to_date_spent": round(spent_mtd, 2),
+        "days_elapsed": int(days_elapsed),
+        "days_in_month": int(days_in_month),
+        "predicted_month_total": round(predicted_total, 2),
+    }
+
+
+def simulate_reduction(df: Optional[pd.DataFrame], category: str, percentage: float) -> Dict[str, Any]:
+    """
+    Scenario planning: simulate the impact of reducing spending in `category`
+    by `percentage` (e.g., 20 for 20%).
+
+    Returns reduction amount, new total, and a 6-month savings impact
+    (assumes same monthly reduction repeats for 6 months).
+    """
+    if df is None or df.empty:
+        return {
+            "status": "empty",
+            "category": category,
+            "percentage": float(percentage or 0),
+            "category_spent": 0.0,
+            "reduction_amount": 0.0,
+            "new_total_spent": 0.0,
+            "six_month_savings_impact": 0.0,
+        }
+
+    pct = float(percentage or 0)
+    pct = max(0.0, min(pct, 100.0))
+
+    df_local = df.copy()
+    total_spent = float(df_local["amount"].sum())
+
+    category_key = (category or "").strip().lower()
+    cat_mask = df_local["category"].astype(str).str.strip().str.lower().eq(category_key)
+    category_spent = float(df_local.loc[cat_mask, "amount"].sum())
+
+    reduction_amount = category_spent * (pct / 100.0)
+    new_total = total_spent - reduction_amount
+
+    return {
+        "status": "ok",
+        "category": category,
+        "percentage": round(pct, 2),
+        "category_spent": round(category_spent, 2),
+        "reduction_amount": round(reduction_amount, 2),
+        "new_total_spent": round(new_total, 2),
+        "six_month_savings_impact": round(reduction_amount * 6.0, 2),
+    }
+
+
+def detect_anomalies(
+    df: pd.DataFrame,
+    zscore_threshold: float = 2.0,
+    large_txn_share_threshold: float = 0.10,
+) -> Dict[str, Any]:
+    """
+    Identify anomalous transactions using:
+    - Standard deviation-based z-score on transaction amounts
+    - Any transaction amount >= `large_txn_share_threshold` of total spend
+
+    Also explicitly flags transactions with amount ~ 10,000 (ATM withdrawal example).
+    """
+    if df.empty:
+        return {
+            "status": "empty",
+            "zscore_threshold": float(zscore_threshold),
+            "large_txn_share_threshold": float(large_txn_share_threshold),
+            "large_txn_amount_threshold": 0.0,
+            "flagged_transactions": [],
+        }
+
+    df_local = df.copy()
+    amounts = df_local["amount"].astype(float)
+
+    total_spent = float(amounts.sum())
+    large_amt_threshold = float(total_spent * float(large_txn_share_threshold or 0))
+
+    mean = float(amounts.mean()) if len(amounts) else 0.0
+    std = float(amounts.std(ddof=0)) if len(amounts) else 0.0
+
+    def z_score(x: float) -> float:
+        if std <= 0:
+            return 0.0
+        return (float(x) - mean) / std
+
+    flagged: List[Dict[str, Any]] = []
+    for _, row in df_local.iterrows():
+        amount = float(row.get("amount", 0) or 0)
+        z = z_score(amount)
+
+        reasons: List[str] = []
+        if abs(z) >= float(zscore_threshold or 0):
+            reasons.append("zscore_outlier")
+        if large_amt_threshold > 0 and amount >= large_amt_threshold:
+            reasons.append("over_10pct_total")
+        if math.isclose(amount, 10000.0, rel_tol=0.0, abs_tol=0.01):
+            reasons.append("amount_equals_10000")
+
+        if not reasons:
+            continue
+
+        dt = row.get("datetime")
+        dt_str = str(dt) if dt is not None else None
+
+        flagged.append({
+            "datetime": dt_str,
+            "date": str(getattr(dt, "date")()) if hasattr(dt, "date") else None,
+            "description": row.get("description"),
+            "category": row.get("category"),
+            "transaction_id": row.get("transaction_id"),
+            "amount": round(amount, 2),
+            "z_score": round(float(z), 4),
+            "reasons": reasons,
+        })
+
+    # Sort most "severe" first (absolute z-score, then amount)
+    flagged.sort(key=lambda x: (abs(float(x.get("z_score") or 0)), float(x.get("amount") or 0)), reverse=True)
+
+    return {
+        "status": "ok",
+        "zscore_threshold": float(zscore_threshold),
+        "large_txn_share_threshold": float(large_txn_share_threshold),
+        "large_txn_amount_threshold": round(large_amt_threshold, 2),
+        "mean_amount": round(mean, 2),
+        "std_amount": round(std, 2),
+        "flagged_transactions": flagged,
+    }
+
+
+def build_predictive_financial_engine(
+    df: pd.DataFrame,
+    current_balance: Optional[float] = None,
+    scenario_category: str = "Transfer",
+    scenario_percentage: float = 20.0,
+) -> Dict[str, Any]:
+    """
+    Aggregate helper that returns all advanced/predictive analytics in a single
+    JSON-serializable object for the frontend AdvancedAnalytics tab.
+    """
+    if df.empty:
+        return {
+            "status": "empty",
+            "burn_rate": calculate_average_daily_burn_rate(df),
+            "cash_flow_forecast": {
+                "next_week_sma": forecast_next_week_sma(df),
+                "monthly_projection": predict_monthly_total(df),
+            },
+            "scenario_planning": simulate_reduction(df, scenario_category, scenario_percentage),
+            "anomalies": detect_anomalies(df),
+        }
+
+    burn = calculate_average_daily_burn_rate(df)
+    runway = None
+    if current_balance is not None:
+        runway = calculate_runway(
+            float(current_balance or 0),
+            average_daily_burn_rate=float(burn.get("average_daily_burn_rate") or 0),
+        )
+
+    return {
+        "status": "ok",
+        "burn_rate": {
+            **burn,
+            "runway": runway,
+        },
+        "cash_flow_forecast": {
+            "next_week_sma": forecast_next_week_sma(df, window_days=7),
+            "monthly_projection": predict_monthly_total(df),
+        },
+        "scenario_planning": simulate_reduction(df, scenario_category, scenario_percentage),
+        "anomalies": detect_anomalies(df, zscore_threshold=2.0, large_txn_share_threshold=0.10),
+    }
 
 
 # ==================================================================

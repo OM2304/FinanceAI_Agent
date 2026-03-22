@@ -2,7 +2,13 @@ from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Header, Q
 from tools.advisor import chat_with_advisor, process_statement_tool
 from tools.guru_content import ingest_guru_document, list_guru_documents
 from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token
-from tools.analytics import refresh_analysis, calculate_budget_adherence, get_spending_patterns, build_budget_recommendations
+from tools.analytics import (
+    refresh_analysis,
+    calculate_budget_adherence,
+    get_spending_patterns,
+    build_budget_recommendations,
+    build_predictive_financial_engine,
+)
 from tools.data_processor import load_and_clean_data, load_budget_limits, save_budget_limits
 from tools.splitwise_client import get_groups, get_expenses as splitwise_get_expenses, get_group, get_current_user as splitwise_current_user, build_authorize_url, exchange_code_for_token, create_expense
 from tools.splitwise_analytics import summarize_group_expenses
@@ -631,6 +637,27 @@ def get_spending_patterns_endpoint(current_user: dict = Depends(get_current_user
         return patterns
     except Exception as e:
         print(f"SPENDING PATTERNS ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/insights/predictive")
+def get_predictive_insights_endpoint(
+    current_balance: Optional[float] = None,
+    scenario_category: str = "Transfer",
+    scenario_percentage: float = 20.0,
+    current_user: dict = Depends(get_current_user),
+):
+    """Predictive financial insights (burn/runway, forecasts, what-if, anomalies)."""
+    try:
+        df = load_and_clean_data(current_user["id"])
+        return build_predictive_financial_engine(
+            df,
+            current_balance=current_balance,
+            scenario_category=scenario_category,
+            scenario_percentage=scenario_percentage,
+        )
+    except Exception as e:
+        print(f"PREDICTIVE INSIGHTS ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/expenses/{expense_id}")

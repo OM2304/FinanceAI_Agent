@@ -1,126 +1,81 @@
-# Finance AI Agent
+# FinSight Console (Finance AI Agent)
 
-AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics dashboards, AI advisor chat, budget controls, guru knowledge library, Splitwise integration, tax advisor, and wealth management.
+AI-powered personal finance console with a professional **Advanced Analytics dashboard** and an **Export Engine** for accountant-ready reporting. Ingest expenses from receipts, statements, and CSVs, then explore predictive insights, scenario planning, anomaly flags, budgets, and a multi-guru advisor.
 
-## Tech Stack
+## Analysis of the Previous README (What Changed)
 
-- Frontend: Next.js (App Router), React, Tailwind CSS, Recharts
-- Backend: FastAPI (Python)
-- Database/Auth: Supabase (Postgres + Auth)
-- AI/ML: Google Gemini (advisor + enrichment), sklearn (adaptive categorization)
-- OCR/PDF: OCR.Space, OpenCV, pdfplumber, pikepdf, PyPDF2
-- External API: Splitwise API (OAuth + expenses), MF API (mutual funds)
+The previous README described ingestion, charts, and advisor features well, but it didn’t showcase the two big “professional polish” additions you’ve built:
 
-## Implemented Features
+- **Advanced Analytics Dashboard**: predictive burn/runway metrics, strategic widgets (merchant concentration + category growth), what‑if simulation with 6‑month impact, and anomaly detection using Z‑Scores.
+- **Automated Financial Reporting**: a printable “Financial Statement” PDF export and an accountant-ready CSV export with extra flags/remarks.
+- **API surface**: predictive insights endpoint (`GET /insights/predictive`) was missing.
+- **Clarity**: environment variables had duplicated blocks and setup can be simpler (`pip install -r requirements.txt`).
 
-### 1. Authentication and Session Handling
+This README is rewritten to highlight those capabilities in a clarity-first structure.
 
-- Email/password login and signup via Supabase
-- Google OAuth login flow (`/auth/callback`)
-- Frontend stores access token and sends it as Bearer token to backend
-- Backend verifies user token before protected operations
+## Core Feature: Advanced Analytics Dashboard
 
-### 2. Multi-Source Expense Ingestion
+High-signal insights designed for quick scanning, with drill-down context when needed.
 
-- OCR image upload (payment screenshots/receipts)
-- PDF bank statement upload with password handling
-- Manual transaction entry form
-- CSV transaction import (`/transactions/import-csv`)
-- Transaction confirmation modal before saving OCR output
-- Field-level validation and low-confidence warnings in confirmation UI
+### Predictive Engine (Burn Rate + Runway)
 
-### 3. Adaptive Categorization
+- **Average Daily Burn (ADB)**: total spend ÷ number of days in the tracking period.
+  - Example: total spend `₹20,614.46` → **ADB `₹2,576.81`**
+- **Runway (Days)**: forecasts how long current funds last at the current ADB.
+  - Enter a balance in the dashboard to compute runway days.
 
-- Hybrid categorization flow:
-  - ML model prediction from known transactions (`ml_categorizer.py`)
-  - Gemini fallback when ML confidence is low
-- Category corrections can be saved with transaction metadata (`corrected`, `ai_confidence`)
+### Strategic Insights (Behavior + Trends)
 
-### 4. Transaction Operations
+- **Merchant Concentration**: highlights the **Top 5** merchants by spend to quickly spot concentration risk.
+- **Category Growth**: compares two rolling periods (WoW/MoM-style) to surface categories accelerating up or down.
 
-- Save confirmed transaction
-- Import transactions in bulk from CSV
-- Fetch user transactions
-- Delete transaction
-- Automatic chart refresh after create/delete/import workflows
+### Simulation Tool (What‑If / Scenario Planning)
 
-### 5. Analytics and Insights
+- **What‑If Reduction**: simulate reducing a category by a given percentage and see how the period total changes.
+- **6‑Month Savings Impact**: projects the same reduction across six months for long-term clarity.
+  - Example: reduce **Transfers** by **20%** → **`₹21,618`** projected savings over 6 months.
 
-- KPI cards in dashboard:
-  - Total spending
-  - Total categories
-  - Average transaction amount
-- Backend-generated charts:
-  - Total spending by category (bar)
-  - Monthly trend (line)
-  - Category distribution (pie)
-  - Top merchants (barh)
-- Spending pattern insights:
-  - Avg daily spend
-  - Top category and merchant
-  - Busiest weekday
-  - Weekend vs weekday share
-  - Recurring merchants
-  - Month-over-month change
-- Budget recommendations generated from behavior patterns
+## Core Feature: Automated Financial Reporting (Export Engine)
 
-### 6. Budget Management
+### Professional PDF Export (“Financial Statement”)
 
-- Per-user budget limits (DB-backed with local JSON fallback)
-- Budget summary showing:
-  - Budget vs spent
-  - Remaining amount
-  - Over/under-budget status
-- Add custom categories and limits from UI
+One-click export from the UI that includes:
 
-### 7. AI Financial Advisor
+- **Summary Statistics** (total spent, average transaction, transaction count)
+- **Category Table** (sorted by spend)
+- **AI-generated Guru Insights** (concise, action-oriented guidance)
 
-- Chat endpoint with user-aware financial context
-- Guru style preference in UI:
-  - Warren Buffett
-  - Robert Kiyosaki
-  - Ramit Sethi
-- Advisor uses:
-  - Spending summary
-  - Recent transactions
-  - Pattern insights
-  - Budget recommendations
-- Friendly response rendering from structured agent output
+### Accountant‑Ready CSV Export
 
-### 8. Guru Content Library (RAG-lite)
+Export a normalized CSV with extra fields for faster review and bookkeeping:
 
-- Upload guru documents (`PDF`, `TXT`, `MD`)
-- Automatic text extraction and chunking
-- Per-user/per-guru document index
-- Query-time snippet retrieval used by advisor prompt context
+- `Tax_Potential` flags
+- `Guru_Remark` annotations (e.g., “Significant” vs “Routine”)
 
-### 9. Splitwise Integration
+## Intelligence Layer
 
-- Splitwise OAuth connect flow
-- Fetch groups, group info, current user
-- Fetch expenses for group or all
-- Group-level summary:
-  - total cost
-  - paid by
-  - owed by
-  - net balances
-- Create Splitwise expense from UI (equal split support)
+### Anomaly Detection (Z‑Scores + Impact Flags)
 
-### 10. Tax Advisor
+- Uses a standard deviation-based **Z‑Score** to identify outliers.
+- Also flags any transaction **> 10%** of total period spend.
+- Designed to catch high-impact transactions like a **₹10,000 ATM withdrawal**.
 
-- Tax saving plan recommendations based on annual income and existing 80C deductions
-- India tax calculations under new regime (FY 2025-26/2026-27)
-- Section 87A rebate considerations
-- Personalized tax-saving suggestions
+### Multi‑Guru Advisor
 
-### 11. Wealth Management
+An assistant that can channel distinct financial philosophies:
 
-- Investment recommendations based on risk profile and tax regime
-- Mutual fund NAV fetching for ELSS and SIP schemes
-- Financial calculators:
-  - PPF (Public Provident Fund) maturity calculator
-  - SIP (Systematic Investment Plan) future value calculator
-- Wealth advice panel with risk assessment
+- **Warren Buffett**
+- **Robert Kiyosaki**
+- **Ramit Sethi**
+
+## Technical Architecture
+
+- **Frontend**: Next.js (App Router, Turbopack dev), React, Tailwind CSS
+- **Backend**: Python + FastAPI for analytics and forecasting logic
+- **Database/Auth**: Supabase (Postgres + Auth)
+- **AI/ML**: Google Gemini (advisor + enrichment), sklearn (adaptive categorization)
+- **OCR/PDF**: OCR.Space, OpenCV, pdfplumber, pikepdf, PyPDF2
+- **Integrations**: Splitwise API (OAuth + expenses), MF API (mutual funds)
 
 ## API Endpoints (Current)
 
@@ -137,6 +92,7 @@ AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics 
 - `POST /budget/limits`
 - `GET /budget/summary`
 - `GET /insights/patterns`
+- `GET /insights/predictive`
 - `POST /guru/upload`
 - `GET /guru/content`
 - `GET /splitwise/groups`
@@ -149,106 +105,32 @@ AI-powered personal finance assistant with receipt/PDF/CSV ingestion, analytics 
 - `POST /splitwise/expenses`
 - `POST /api/tax-saving-plan`
 
-## Current Project Structure
+## Project Structure
 
 ```
 Financial_AI_Agent_W3_4/
 ├── README.md
 ├── backend/
-│   ├── __init__.py
 │   ├── main.py
 │   ├── requirements.txt
-│   ├── __pycache__/
-│   ├── data/
-│   │   └── reports/
-│   ├── financial_engine/
-│   │   ├── __init__.py
-│   │   ├── advisor.py
-│   │   ├── calculators.py
-│   │   ├── mf_api.py
-│   │   ├── tax_advisor.py
-│   │   └── __pycache__/
-│   ├── temp/
 │   └── tools/
-│       ├── __init__.py
-│       ├── _splitwise_oauth_stub.txt
-│       ├── advisor.py
 │       ├── analytics.py
+│       ├── advisor.py
 │       ├── data_processor.py
-│       ├── guru_content.py
-│       ├── guru_logic.py
-│       ├── llm_config.py
-│       ├── ml_categorizer.py
-│       ├── ocr_processor.py
-│       ├── splitwise_analytics.py
-│       ├── splitwise_client.py
 │       ├── statement_processor.py
-│       ├── supabase_db.py
-│       ├── tempCodeRunnerFile.py
-│       └── __pycache__/
+│       └── supabase_db.py
 ├── data/
 │   ├── budget_limit.json
-│   ├── demo_expense_dataset_100_records_with_payment_modes.csv
-│   ├── guru_data.py
-│   ├── __pycache__/
-│   ├── guru_docs/
-│   │   ├── 022a6561-1a68-48ee-ad63-30a6a9c158dc/
-│   │   │   ├── index.json
-│   │   │   └── warren_buffett/
-│   │   │       └── warren_buffet_c437bf85-b5a7-4d37-94cc-5e15a4f3318d.chunks.json
-│   │   └── 9e52cb5e-38bb-41b0-9878-ab70e0b842e6/
-│   │       ├── index.json
-│   │       └── warren_buffett/
-│   │           └── warren_buffet_1986777e-0ad0-4d41-8075-1f53e89bb6ca.chunks.json
 │   └── reports/
-├── frontend/
-│   ├── eslint.config.mjs
-│   ├── jsconfig.json
-│   ├── middleware.js
-│   ├── next-env.d.ts
-│   ├── next.config.js
-│   ├── package.json
-│   ├── postcss.config.mjs
-│   ├── README.md
-│   ├── repomix-output.xml
-│   ├── tsconfig.json
-│   ├── app/
-│   │   ├── actions.js
-│   │   ├── globals.css
-│   │   ├── layout.jsx
-│   │   ├── page.jsx
-│   │   ├── auth/
-│   │   │   └── callback/
-│   │   │       └── page.jsx
-│   │   ├── components/
-│   │   │   ├── AiAssistant.jsx
-│   │   │   ├── AuthComponent.jsx
-│   │   │   ├── BackendCharts.jsx
-│   │   │   ├── BudgetPanel.jsx
-│   │   │   ├── DeleteButton.js
-│   │   │   ├── ExpenseChart.js
-│   │   │   ├── GuruLibrary.jsx
-│   │   │   ├── SpendingPatterns.jsx
-│   │   │   ├── SplitwisePanel.jsx
-│   │   │   ├── TaxAdvisor.jsx
-│   │   │   ├── TransactionConfirmationModal.jsx
-│   │   │   ├── UploadComponent.js
-│   │   │   └── WealthPanel.jsx
-│   │   ├── login/
-│   │   │   └── page.jsx
-│   │   └── splitwise/
-│   │       └── callback/
-│   │           └── page.jsx
-│   ├── lib/
-│   │   ├── api.js
-│   │   ├── formatters.js
-│   │   ├── index.js
-│   │   ├── supabaseClient.js
-│   │   └── supabase/
-│   │       ├── client.js
-│   │       └── server.js
-│   └── public/
-└── temp/
+└── frontend/
+    ├── lib/
+    │   └── api.js
+    └── app/
+        └── components/
+            ├── AdvancedAnalytics.jsx
+            ├── PredictiveAnalytics.jsx
+            ├── ExportDropdown.jsx
+            └── FinancialReportTemplate.jsx
 ```
 
 ## Environment Variables
@@ -258,24 +140,15 @@ Financial_AI_Agent_W3_4/
 ```env
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your_supabase_service_key
-# Optional fallback in code:
-# SUPABASE_KEY=your_supabase_key
 
 GOOGLE_API_KEY=your_google_api_key
 OCR_SPACE_API_KEY=your_ocr_space_api_key
 
 SPLITWISE_CLIENT_ID=your_splitwise_client_id
 SPLITWISE_CLIENT_SECRET=your_splitwise_client_secret
-# Optional fallback if you want static token mode
-```
 
-### Frontend (`frontend/.env.local`)
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-SPLITWISE_ACCESS_TOKEN=your_splitwise_access_token
+# Optional: static token mode (if bypassing OAuth in development)
+# SPLITWISE_ACCESS_TOKEN=your_splitwise_access_token
 ```
 
 ### Frontend (`frontend/.env.local`)
@@ -294,7 +167,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
-pip install fastapi uvicorn python-dotenv supabase pandas matplotlib opencv-python requests pdfplumber pikepdf PyPDF2 scikit-learn langchain langchain-google-genai
+pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
@@ -317,3 +190,4 @@ Open:
 - `data/guru_docs/` stores uploaded guru files and chunk indexes by user.
 - Splitwise callback route used by frontend: `http://localhost:3000/splitwise/callback`
 - Supabase auth callback route: `http://localhost:3000/auth/callback`
+
