@@ -11,11 +11,13 @@ import { SplitwisePanel } from './components/SplitwisePanel';
 import AdvancedAnalytics from './components/AdvancedAnalytics';
 import WealthPanel from './components/WealthPanel';
 import TaxAdvisor from './components/TaxAdvisor';
-import { fetchExpenses } from '../lib/api';
+import { TransactionConfirmationModal } from './components/TransactionConfirmationModal';
+import { confirmTransaction, fetchExpenses } from '../lib/api';
 import { formatINR } from '../lib/formatters';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { createClient } from '../lib/supabase/client';
 
 const ExportDropdown = dynamic(() => import('./components/ExportDropdown'), { ssr: false });
 
@@ -77,6 +79,12 @@ export default function Home() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [confirmationData, setConfirmationData] = useState(null);
+  const [confirmationSaving, setConfirmationSaving] = useState(false);
+  const [confirmationError, setConfirmationError] = useState('');
+  const [confirmationNonce, setConfirmationNonce] = useState(0);
+
   const loadExpenses = useCallback(async () => {
     try {
       const token = localStorage.getItem('sb-token');
@@ -123,6 +131,52 @@ export default function Home() {
     localStorage.setItem('theme', next);
     document.documentElement.setAttribute('data-theme', next);
   };
+
+  const openConfirmation = useCallback((extractedData) => {
+    setConfirmationData(extractedData);
+    setConfirmationError('');
+    setConfirmationOpen(true);
+    setConfirmationNonce((n) => n + 1);
+  }, []);
+
+  const discardConfirmation = useCallback(() => {
+    setConfirmationOpen(false);
+    setConfirmationData(null);
+    setConfirmationError('');
+  }, []);
+
+  const confirmFromModal = useCallback(
+    async (confirmedData) => {
+      try {
+        setConfirmationSaving(true);
+        setConfirmationError('');
+
+        const supabase = createClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          setConfirmationError('Your session has expired. Please log in again.');
+          return;
+        }
+
+        const dataToSave = { ...(confirmedData || {}) };
+        delete dataToSave.confidence;
+        await confirmTransaction(dataToSave, session.access_token);
+
+        discardConfirmation();
+        await loadExpenses();
+        router.refresh();
+      } catch (error) {
+        console.error('Error saving transaction:', error);
+        setConfirmationError(error?.message || 'Failed to save transaction. Please try again.');
+      } finally {
+        setConfirmationSaving(false);
+      }
+    },
+    [discardConfirmation, loadExpenses, router]
+  );
 
   const sortedExpenses = useMemo(() => {
     return (expenses ?? [])
@@ -191,7 +245,7 @@ export default function Home() {
             </div>
 
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex items-center gap-2 relative z-[9999]">
+              <div className="bg-white/70 backdrop-blur border border-white/60 shadow-md shadow-slate-200/50 rounded-2xl px-4 py-3 flex items-center gap-2 relative z-10">
                 <button
                   type="button"
                   onClick={() => setActiveTab('overview')}
@@ -365,7 +419,7 @@ export default function Home() {
               </div>
               <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Secure OCR</div>
             </div>
-            <UploadComponent onUploadSuccess={loadExpenses} />
+            <UploadComponent onUploadSuccess={loadExpenses} onRequestConfirmation={openConfirmation} />
           </section>
         )}
 
@@ -568,6 +622,18 @@ export default function Home() {
 
         {activeTab === 'tax' && <TaxAdvisor />}
       </div>
+
+      {confirmationOpen && confirmationData && (
+        <TransactionConfirmationModal
+          key={confirmationNonce}
+          isOpen={confirmationOpen}
+          extractedData={confirmationData}
+          onConfirm={confirmFromModal}
+          onDiscard={discardConfirmation}
+          isSaving={confirmationSaving}
+          errorMessage={confirmationError}
+        />
+      )}
     </main>
   );
 }

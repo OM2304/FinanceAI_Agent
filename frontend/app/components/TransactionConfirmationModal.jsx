@@ -1,26 +1,21 @@
 'use client'
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export function TransactionConfirmationModal({
   isOpen,
   extractedData,
   onConfirm,
   onDiscard,
-  isSaving = false
+  isSaving = false,
+  errorMessage = ''
 }) {
-  const [editedData, setEditedData] = useState(null);
+  const [editedData, setEditedData] = useState(() =>
+    extractedData ? { ...extractedData, corrected: false } : null
+  );
   const [editingField, setEditingField] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
   const [warnings, setWarnings] = useState({});
-
-  useEffect(() => {
-    if (extractedData) {
-      setEditedData({ ...extractedData, corrected: false });
-      setValidationErrors({});
-      setWarnings({});
-      setEditingField(null);
-    }
-  }, [extractedData]);
 
   const getConfidence = (field) => {
     if (!editedData || !editedData.confidence) return 1.0;
@@ -92,7 +87,7 @@ export function TransactionConfirmationModal({
     }
   };
 
-  const FieldDisplay = ({ field, label }) => {
+  const renderField = (field, label) => {
     const isEditing = editingField === field;
     const hasError = validationErrors[field];
     const hasWarning = warnings[field];
@@ -161,10 +156,14 @@ export function TransactionConfirmationModal({
     );
   };
 
-  if (!isOpen || !extractedData || !editedData) return null;
+  const portalTarget =
+    typeof document !== 'undefined' ? document.getElementById('modal-root') || document.body : null;
+  const isReady = Boolean(isOpen && extractedData && editedData && portalTarget);
 
-  return (
-    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+  if (!isReady) return null;
+
+  const modalUi = (
+    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-[10000]">
       <div className="bg-white/90 backdrop-blur border border-white/70 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-slate-200/70">
           <div className="flex justify-between items-center">
@@ -185,19 +184,25 @@ export function TransactionConfirmationModal({
 
         <div className="p-6 overflow-y-auto space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FieldDisplay field="amount" label="Amount (INR)" />
-            <FieldDisplay field="category" label="Category" />
+            {renderField("amount", "Amount (INR)")}
+            {renderField("category", "Category")}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FieldDisplay field="date" label="Date" />
-            <FieldDisplay field="time" label="Time" />
+            {renderField("date", "Date")}
+            {renderField("time", "Time")}
           </div>
-          <FieldDisplay field="sender" label="Sender" />
-          <FieldDisplay field="receiver" label="Receiver" />
-          <FieldDisplay field="transaction_id" label="Transaction ID" />
+          {renderField("sender", "Sender")}
+          {renderField("receiver", "Receiver")}
+          {renderField("transaction_id", "Transaction ID")}
         </div>
 
         <div className="p-6 bg-slate-50/70 rounded-b-3xl border-t border-slate-200/70">
+          {errorMessage && (
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="flex gap-3">
             <button
               onClick={handleConfirm}
@@ -227,4 +232,6 @@ export function TransactionConfirmationModal({
       </div>
     </div>
   );
+
+  return createPortal(modalUi, portalTarget);
 }

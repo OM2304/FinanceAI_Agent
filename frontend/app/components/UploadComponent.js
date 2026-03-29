@@ -1,19 +1,15 @@
 'use client'
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TransactionConfirmationModal } from './TransactionConfirmationModal';
 import { confirmTransaction, uploadCsvTransactions } from '../../lib/api';
 import { createClient } from '../../lib/supabase/client';
 
-export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
+export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { // <--- Receive Prop
   const [status, setStatus] = useState("idle");
   const [password, setPassword] = useState("");
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [message, setMessage] = useState("");
-  const [extractedData, setExtractedData] = useState(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [activeSource, setActiveSource] = useState("ocr");
   const [manualData, setManualData] = useState({
     amount: '',
@@ -91,9 +87,9 @@ export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
         setStatus("idle");
         setMessage("🔐 This PDF requires a password. Please enter it below.");
       } else if (data.success && data.extracted_data) {
-        // Show confirmation modal with extracted data
-        setExtractedData(data.extracted_data);
-        setShowConfirmation(true);
+        if (onRequestConfirmation) {
+          onRequestConfirmation(data.extracted_data);
+        }
         setStatus("idle");
         setMessage("");
         // Reset file input
@@ -217,21 +213,18 @@ export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
         return;
       }
 
-      setIsSaving(true);
       setStatus("uploading");
       setMessage("Saving transaction...");
       
       // Remove confidence scores before sending (not needed for saving)
-      const { confidence, ...dataToSave } = confirmedData;
+      const dataToSave = { ...(confirmedData || {}) };
+      delete dataToSave.confidence;
       
       console.log("Saving transaction:", dataToSave);
       
       const result = await confirmTransaction(dataToSave, session.access_token);
       console.log("Save result:", result);
       
-      setShowConfirmation(false);
-      setExtractedData(null);
-      setIsSaving(false);
       setStatus("success");
       setMessage("✅ Transaction saved successfully!");
       
@@ -245,7 +238,6 @@ export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
       }, 3000);
     } catch (error) {
       console.error("Error saving transaction:", error);
-      setIsSaving(false);
       setStatus("error");
       setMessage(`❌ Failed to save: ${error.message || "Unknown error"}`);
       // Keep modal open so user can try again
@@ -254,14 +246,15 @@ export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
 
   // ... rest of the component (handleDiscardTransaction and return) remains the same
   const handleDiscardTransaction = () => {
-    setShowConfirmation(false);
-    setExtractedData(null);
     setStatus("idle");
     setMessage("Transaction discarded");
     setTimeout(() => {
       setMessage("");
     }, 2000);
   };
+
+  void handleConfirmTransaction;
+  void handleDiscardTransaction;
 
   return (
     <>
@@ -464,14 +457,6 @@ export function UploadComponent({ onUploadSuccess }) { // <--- Receive Prop
         </div>
       )}
 
-      {/* Confirmation Modal */}
-      <TransactionConfirmationModal
-        isOpen={showConfirmation}
-        extractedData={extractedData}
-        onConfirm={handleConfirmTransaction}
-        onDiscard={handleDiscardTransaction}
-        isSaving={isSaving}
-      />
     </>
   );
 }
