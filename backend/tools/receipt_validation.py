@@ -28,6 +28,7 @@ class ExpenseCategory(str, Enum):
 
 ALLOWED_CATEGORIES = {c.value for c in ExpenseCategory}
 SUPPORTED_RECEIPT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf"}
+ALLOWED_TYPES = ["payment_screenshot", "printed_receipt", "invoice"]
 
 
 class OCRError(Exception):
@@ -65,6 +66,13 @@ class OCRError(Exception):
             message=f"Unsupported file type. Please upload one of: {supported}.",
         )
 
+    @classmethod
+    def invalid_image_type(cls) -> "OCRError":
+        return cls(
+            code="INVALID_IMAGE_TYPE",
+            message="This image does not appear to be a payment screenshot or receipt. Please upload a valid financial document.",
+        )
+
 
 class Expense(BaseModel):
     amount: condecimal(gt=0) = Field(..., description="Positive expense total amount.")
@@ -96,8 +104,9 @@ class Expense(BaseModel):
 
 @dataclass(frozen=True)
 class ReceiptExtraction:
-    total_amount: Decimal
-    receipt_date: date
+    total_amount: Optional[Decimal]
+    receipt_date: Optional[date]
+    receipt_time: Optional[str] = None
     merchant: Optional[str] = None
     currency: Optional[str] = None
     suggested_category: ExpenseCategory = ExpenseCategory.OTHER
@@ -201,16 +210,49 @@ def _simulate_ocr(file_name: str) -> Tuple[str, float]:
     return "Merchant: Demo Cafe\nDate: 2026-03-29\nTotal Amount: INR 450.50\n", 0.92
 
 
+def classify_document_type(*, file_name: str = "", ocr_text: str = "") -> str:
+    """
+    AI-assisted (with heuristic fallback) classification to prevent processing non-financial images.
+
+    Returns one of ALLOWED_TYPES or "unknown".
+    """
+    text = (ocr_text or "").strip()
+    fname = (file_name or "").lower()
+
+    # Heuristic fallback (fast + offline safe)
+    haystack = f"{fname}\n{text}".lower()
+    if "invoice" in haystack:
+        return "invoice"
+    if any(token in haystack for token in ("screenshot", "upi", "payment", "paid", "txn", "transaction")):
+        return "payment_screenshot"
+    if any(token in haystack for token in ("receipt", "total", "subtotal", "tax", "gst", "amount", "bill")):
+        return "printed_receipt"
+
+    # Optional AI refinement when an LLM is configured (best-effort)
+    try:
+        from tools.llm_config import get_llm
+
+        llm = get_llm()
+        prompt = (
+            "Classify this OCR text into one of: payment_screenshot, printed_receipt, invoice, unknown.\n"
+            "Return ONLY the label.\n\n"
+            f"FILENAME: {file_name}\n"
+            f"OCR_TEXT:\n{text[:2500]}"
+        )
+        response = llm.invoke(prompt)
+        label = str(getattr(response, "content", response)).strip().strip('"').strip("'").lower()
+        if label in ALLOWED_TYPES:
+            return label
+    except Exception:
+        pass
+
+    return "unknown"
+
+
 def extract_receipt_fields(ocr_text: str) -> ReceiptExtraction:
     total_amount = _extract_total_amount(ocr_text)
     receipt_date = _extract_receipt_date(ocr_text)
-    missing: list[str] = []
-    if total_amount is None:
-        missing.append("Total Amount")
-    if receipt_date is None:
-        missing.append("Date")
-    if missing:
-        raise OCRError.missing_fields(missing)
+    receipt_time = _extract_receipt_time(ocr_text)
 
     currency_match = re.search(r"\b(INR|USD|EUR)\b", ocr_text or "", flags=re.IGNORECASE)
     currency = currency_match.group(1).upper() if currency_match else None
@@ -221,10 +263,26 @@ def extract_receipt_fields(ocr_text: str) -> ReceiptExtraction:
     return ReceiptExtraction(
         total_amount=total_amount,
         receipt_date=receipt_date,
+        receipt_time=receipt_time,
         merchant=merchant,
         currency=currency,
         suggested_category=suggested_category,
     )
+
+
+_TIME_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b((?:[01]\d|2[0-3]):[0-5]\d)\b"),  # 23:59
+    re.compile(r"\b((?:0?[1-9]|1[0-2]):[0-5]\d\s?(?:AM|PM))\b", re.IGNORECASE),  # 1:05 PM
+)
+
+
+def _extract_receipt_time(text: str) -> Optional[str]:
+    for pattern in _TIME_PATTERNS:
+        match = pattern.search(text or "")
+        if not match:
+            continue
+        return match.group(1).strip()
+    return None
 
 
 def _expense_to_json_dict(expense: Expense) -> Dict[str, Any]:
@@ -242,6 +300,22 @@ def _expense_to_json_dict(expense: Expense) -> Dict[str, Any]:
     if isinstance(payload.get("category"), ExpenseCategory):
         payload["category"] = payload["category"].value
     return payload
+
+
+def flatten_pydantic_error(exc: ValidationError) -> str:
+    """
+    Convert Pydantic ValidationError into a compact, user-readable string.
+    """
+    try:
+        items = []
+        for err in exc.errors():
+            loc = err.get("loc") or []
+            field = ".".join(str(p) for p in loc) if loc else "field"
+            msg = err.get("msg") or "Invalid value"
+            items.append(f"{field}: {msg}")
+        return "; ".join(items) if items else str(exc)
+    except Exception:  # pragma: no cover
+        return str(exc)
 
 
 def process_receipt_ocr(
@@ -265,31 +339,64 @@ def process_receipt_ocr(
             ocr_text = simulated_text if ocr_text is None else ocr_text
             ocr_confidence = simulated_conf if ocr_confidence is None else ocr_confidence
 
-        if (ocr_confidence or 0.0) < 0.6:
-            raise OCRError.low_confidence()
+        if not (ocr_text or "").strip():
+            return {
+                "success": False,
+                "error": "OCR_FAILED",
+                "message": "OCR failed to read the image. Please upload a clearer photo or scan.",
+            }
+
+        document_type = classify_document_type(file_name=file_name, ocr_text=ocr_text or "")
+        if document_type not in ALLOWED_TYPES:
+            err = OCRError.invalid_image_type()
+            return {
+                "success": False,
+                "error": err.code,
+                "message": err.message,
+                "document_type": document_type,
+                "allowed_types": ALLOWED_TYPES,
+            }
 
         extracted = extract_receipt_fields(ocr_text or "")
         chosen_category = category or extracted.suggested_category.value
 
-        expense = Expense(
-            amount=extracted.total_amount,
-            date=extracted.receipt_date,
-            category=chosen_category,
-            merchant=extracted.merchant,
-            currency=extracted.currency,
+        is_manual_fix_required = any(
+            value is None for value in (extracted.total_amount, extracted.receipt_date, extracted.receipt_time)
         )
+
+        expense = None
+        if extracted.total_amount is not None and extracted.receipt_date is not None:
+            expense = Expense(
+                amount=extracted.total_amount,
+                date=extracted.receipt_date,
+                category=chosen_category,
+                merchant=extracted.merchant,
+                currency=extracted.currency,
+            )
         return {
             "success": True,
-            "expense": _expense_to_json_dict(expense),
+            "is_manual_fix_required": is_manual_fix_required,
+            "document_type": document_type,
+            "allowed_types": ALLOWED_TYPES,
+            "extracted_data": {
+                "amount": str(extracted.total_amount) if extracted.total_amount is not None else None,
+                "date": extracted.receipt_date.isoformat() if extracted.receipt_date is not None else None,
+                "time": extracted.receipt_time or None,
+                "category": chosen_category,
+                "merchant": extracted.merchant,
+                "currency": extracted.currency,
+            },
+            "expense": _expense_to_json_dict(expense) if expense is not None else None,
         }
     except OCRError as exc:
         return {
             "success": False,
-            "error": {"code": exc.code, "message": exc.message},
+            "error": exc.code,
+            "message": exc.message,
         }
     except ValidationError as exc:
         return {
             "success": False,
-            "error": {"code": "VALIDATION_ERROR", "message": str(exc)},
+            "error": "VALIDATION_ERROR",
+            "message": flatten_pydantic_error(exc),
         }
-

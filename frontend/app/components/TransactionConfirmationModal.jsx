@@ -10,10 +10,22 @@ export function TransactionConfirmationModal({
   isSaving = false,
   errorMessage = ''
 }) {
+  const firstMissingField = (() => {
+    const data = extractedData || {};
+    const candidates = ["amount", "date", "time", "sender", "receiver"];
+    for (const field of candidates) {
+      const value = data[field];
+      if (value === null || value === undefined) return field;
+      if (typeof value === "string" && !value.trim()) return field;
+      if (value === "Not found") return field;
+    }
+    return null;
+  })();
+
   const [editedData, setEditedData] = useState(() =>
     extractedData ? { ...extractedData, corrected: false } : null
   );
-  const [editingField, setEditingField] = useState(null);
+  const [editingField, setEditingField] = useState(() => firstMissingField);
   const [validationErrors, setValidationErrors] = useState({});
   const [warnings, setWarnings] = useState({});
 
@@ -24,27 +36,71 @@ export function TransactionConfirmationModal({
 
   const isLowConfidence = (field) => getConfidence(field) < 0.7;
 
-  const validateField = (field, value) => {
+  const sanitizeDateInput = (rawValue) => {
+    const digits = String(rawValue || '').replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  };
+
+  const isValidDateDmy = (value) => {
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(value || '')) return false;
+    const [dd, mm, yyyy] = value.split('/').map((part) => Number(part));
+    if (!dd || !mm || !yyyy) return false;
+    if (mm < 1 || mm > 12) return false;
+    if (dd < 1 || dd > 31) return false;
+    const dt = new Date(yyyy, mm - 1, dd);
+    return dt.getFullYear() === yyyy && dt.getMonth() === mm - 1 && dt.getDate() === dd;
+  };
+
+  const isValidTime = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+
+    // 24-hour: HH:MM (00-23:00-59)
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)) return true;
+
+    // 12-hour: HH:MM AM/PM (01-12:00-59 AM/PM)
+    if (/^(?:0?[1-9]|1[0-2]):[0-5]\d\s?(?:AM|PM)$/i.test(raw)) return true;
+
+    return false;
+  };
+
+  const validateFields = (field, value) => {
     const errors = {};
     const warns = {};
 
     if (field === 'amount') {
-      const numValue = parseFloat(value);
-      if (isNaN(numValue) || numValue <= 0) {
-        errors[field] = 'Amount must be a positive number';
+      const numValue = Number(value);
+      if (!Number.isFinite(numValue) || numValue <= 0) {
+        errors[field] = 'Amount must be a positive number.';
       } else if (numValue > 100000) {
         warns[field] = 'Large amount detected - please verify';
       }
     }
 
+    if (field === 'date') {
+      if (!isValidDateDmy(String(value || ''))) {
+        errors[field] = 'Please enter a valid date.';
+      }
+    }
+
+    if (field === 'time') {
+      if (!isValidTime(value)) {
+        errors[field] = 'Invalid time format.';
+      }
+    }
+
     if (field === 'sender' || field === 'receiver') {
-      if (!value || value.trim().length < 2) {
-        errors[field] = 'Name must be at least 2 characters';
+      const text = String(value || '').trim();
+      if (text.length < 3) {
+        errors[field] = 'Must be at least 3 characters.';
       }
     }
 
     if (field === 'transaction_id') {
-      if (!value || value.trim().length < 4) {
+      const text = String(value || '').trim();
+      if (text && text.toLowerCase() !== 'not found' && text.length < 4) {
         errors[field] = 'Transaction ID must be at least 4 characters';
       }
     }
@@ -52,17 +108,21 @@ export function TransactionConfirmationModal({
     return { errors, warns };
   };
 
-  const handleFieldEdit = (field, value) => {
-    const isManualCorrection = field === 'category' && value !== extractedData.category;
+  const handleInputChange = (field, value, { validate = true } = {}) => {
+    const nextValue =
+      field === 'date' ? sanitizeDateInput(value) : field === 'time' ? String(value || '').toUpperCase() : value;
 
-    const newData = {
-      ...editedData,
-      [field]: value,
-      corrected: isManualCorrection || editedData.corrected
-    };
-    setEditedData(newData);
+    const isManualCorrection = field === 'category' && nextValue !== extractedData?.category;
 
-    const { errors, warns } = validateField(field, value);
+    setEditedData((prev) => ({
+      ...(prev || {}),
+      [field]: nextValue,
+      corrected: isManualCorrection || Boolean(prev?.corrected)
+    }));
+
+    if (!validate) return;
+
+    const { errors, warns } = validateFields(field, nextValue);
     setValidationErrors((prev) => ({ ...prev, [field]: errors[field] }));
     setWarnings((prev) => ({ ...prev, [field]: warns[field] }));
   };
@@ -73,7 +133,7 @@ export function TransactionConfirmationModal({
 
     Object.keys(editedData).forEach((field) => {
       if (field !== 'confidence' && field !== 'corrected') {
-        const { errors, warns } = validateField(field, editedData[field]);
+        const { errors, warns } = validateFields(field, editedData[field]);
         if (errors[field]) allErrors[field] = errors[field];
         if (warns[field]) allWarnings[field] = warns[field];
       }
@@ -128,8 +188,13 @@ export function TransactionConfirmationModal({
           <input
             type={field === 'amount' ? 'number' : 'text'}
             value={editedData[field] || ''}
-            onChange={(e) => handleFieldEdit(field, e.target.value)}
-            onBlur={() => setEditingField(null)}
+            inputMode={field === 'date' ? 'numeric' : undefined}
+            placeholder={field === 'date' ? 'DD/MM/YYYY' : field === 'time' ? 'HH:MM AM/PM or 24-hour' : undefined}
+            onChange={(e) => handleInputChange(field, e.target.value, { validate: true })}
+            onBlur={() => {
+              handleInputChange(field, editedData[field] || '', { validate: true });
+              setEditingField(null);
+            }}
             className={`w-full px-3 py-2 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-900/20 text-slate-900 ${
               hasError ? 'border-rose-500' : hasWarning ? 'border-amber-500' : 'border-slate-200'
             }`}
@@ -161,6 +226,14 @@ export function TransactionConfirmationModal({
   const isReady = Boolean(isOpen && extractedData && editedData && portalTarget);
 
   if (!isReady) return null;
+
+  const hasAnyErrors = Object.values(validationErrors || {}).some(Boolean);
+  const requiredFields = ["amount", "date", "time", "sender", "receiver"];
+  const hasDerivedErrors = requiredFields.some((field) => {
+    const { errors } = validateFields(field, editedData?.[field]);
+    return Boolean(errors[field]);
+  });
+  const isConfirmDisabled = isSaving || hasAnyErrors || hasDerivedErrors;
 
   const modalUi = (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-[10000]">
@@ -206,7 +279,7 @@ export function TransactionConfirmationModal({
           <div className="flex gap-3">
             <button
               onClick={handleConfirm}
-              disabled={isSaving || Object.keys(validationErrors).some((key) => validationErrors[key])}
+              disabled={isConfirmDisabled}
               className="flex-1 bg-slate-900 text-white py-2.5 px-4 rounded-2xl font-semibold hover:bg-slate-800 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? 'Processing...' : 'Confirm & Save'}

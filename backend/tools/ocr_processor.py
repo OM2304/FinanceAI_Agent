@@ -321,6 +321,7 @@ def parse_transaction(image_path):
         "time": time,
         "transaction_id": transaction_id,
         "category": category,
+        "raw_text": raw_text,
         "confidence": {
             "amount": calculate_confidence(amount, "amount", raw_text),
             "sender": calculate_confidence(sender, "sender", raw_text),

@@ -23,6 +23,7 @@ import re
 from pydantic import BaseModel
 from datetime import date, datetime
 from financial_engine import mf_api, calculators, advisor
+from tools.transaction_validation import TransactionConfirmModel
 
 
 app = FastAPI()
@@ -149,6 +150,16 @@ async def upload(
 ):
     """Extract transaction data from receipt/statement but DO NOT save it"""
     from tools.ocr_processor import parse_transaction
+    from tools.receipt_validation import (
+        ALLOWED_TYPES,
+        OCRError,
+        classify_document_type,
+        flatten_pydantic_error,
+    )
+    try:
+        from pydantic.v1 import ValidationError
+    except Exception:  # pragma: no cover
+        from pydantic import ValidationError
     
     # Use absolute path for temp file
     BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -214,9 +225,30 @@ async def upload(
                     "status": f"❌ Error processing PDF statement: {str(e)}",
                     "requires_password": False,
                     "success": False,
+                    "error": "OCR_FAILED",
+                    "message": "OCR failed to read the image. Please try a clearer upload.",
                     "extracted_data": None
                 }
         else:
+            # Validate supported image types up-front (PDF handled above)
+            allowed_exts = {".png", ".jpg", ".jpeg"}
+            _, ext = os.path.splitext((file.filename or "").lower())
+            if ext not in allowed_exts:
+                err = OCRError.invalid_file()
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "requires_password": False,
+                    "extracted_data": None,
+                    "error": err.code,
+                    "message": err.message,
+                    "status": err.message,
+                }
+
             # Extract data using OCR (but don't save)
             extracted = parse_transaction(path)
             
@@ -227,11 +259,49 @@ async def upload(
             except Exception as cleanup_error:
                 print(f"⚠️ Warning: Could not clean up temp image: {cleanup_error}")
             
+            is_manual_fix_required = False
+            document_type = "unknown"
+            if extracted:
+                raw_text = extracted.pop("raw_text", "") or ""
+                document_type = classify_document_type(file_name=file.filename or "", ocr_text=raw_text)
+                if document_type not in ALLOWED_TYPES:
+                    err = OCRError.invalid_image_type()
+                    return {
+                        "success": False,
+                        "requires_password": False,
+                        "extracted_data": None,
+                        "error": err.code,
+                        "message": err.message,
+                        "document_type": document_type,
+                        "allowed_types": ALLOWED_TYPES,
+                        "status": err.message,
+                    }
+
+                # Normalize "Not found" to nulls so the frontend can prompt manual fixes.
+                for key in ("amount", "date", "time"):
+                    if extracted.get(key) in (None, "Not found"):
+                        extracted[key] = None
+
+                is_manual_fix_required = any(extracted.get(k) in (None, "") for k in ("amount", "date", "time"))
+
+                # Low-confidence fields should still proceed to confirmation (no hard error).
+                confidence = extracted.get("confidence") or {}
+                try:
+                    amount_conf = float(confidence.get("amount", 1.0) or 0.0)
+                    date_conf = float(confidence.get("date", 1.0) or 0.0)
+                    time_conf = float(confidence.get("time", 1.0) or 0.0)
+                except Exception:
+                    amount_conf, date_conf, time_conf = 0.0, 0.0, 0.0
+                if amount_conf < 0.6 or date_conf < 0.6 or time_conf < 0.6:
+                    is_manual_fix_required = True
+
             if not extracted:
                 return {
                     "status": "❌ OCR failed to read the image",
                     "requires_password": False,
                     "success": False,
+                    "error": "OCR_FAILED",
+                    "message": "OCR failed to read the image. Please try a clearer upload.",
                     "extracted_data": None
                 }
             
@@ -240,8 +310,42 @@ async def upload(
                 "status": "✅ Data extracted successfully. Please review and confirm.",
                 "requires_password": False,
                 "success": True,
+                "is_manual_fix_required": is_manual_fix_required,
+                "document_type": document_type,
+                "allowed_types": ALLOWED_TYPES,
                 "extracted_data": extracted
             }
+    except OCRError as e:
+        print(f"UPLOAD OCR ERROR: {e}")
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "requires_password": False,
+            "extracted_data": None,
+            "error": e.code,
+            "message": e.message,
+            "status": e.message,
+        }
+    except ValidationError as e:
+        print(f"UPLOAD VALIDATION ERROR: {e}")
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        flat = flatten_pydantic_error(e)
+        return {
+            "success": False,
+            "requires_password": False,
+            "extracted_data": None,
+            "error": "VALIDATION_ERROR",
+            "message": flat,
+            "status": flat,
+        }
     except Exception as e:
         print(f"UPLOAD ERROR: {e}")
         # Clean up temp file on error
@@ -257,32 +361,13 @@ async def upload(
 async def confirm_transaction(data: dict, current_user: dict = Depends(get_current_user)):
     """Save a confirmed transaction after user review"""
     try:
-        # Validate required fields
-        amount = data.get("amount")
-        receiver = data.get("receiver")
-        
-        if not amount or not receiver:
-            raise HTTPException(status_code=400, detail="Amount and receiver are required")
-        
         try:
-            amount = float(amount)
-            if amount <= 0:
-                raise HTTPException(status_code=400, detail="Amount must be greater than 0")
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Amount must be a valid number")
-        
-        # Prepare transaction data
-        transaction_data = {
-            "amount": amount,
-            "receiver": receiver,
-            "sender": data.get("sender", "Self"),
-            "date": data.get("date"),
-            "time": data.get("time", "00:00"),
-            "transaction_id": data.get("transaction_id"),
-            "category": data.get("category"),
-            "ai_confidence": data.get("ai_confidence", 0.5),
-            "corrected": data.get("corrected", False)
-        }
+            tx = TransactionConfirmModel.parse_obj(data)
+        except Exception as e:
+            # Pydantic ValidationError (and any other parse failures) become a 400 with details.
+            raise HTTPException(status_code=400, detail=str(e))
+
+        transaction_data = tx.to_db_dict()
         
         # Save to Supabase
         result = save_transaction(current_user["id"], transaction_data)

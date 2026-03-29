@@ -10,6 +10,7 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [message, setMessage] = useState("");
+  const [manualErrors, setManualErrors] = useState({});
   const [activeSource, setActiveSource] = useState("ocr");
   const [manualData, setManualData] = useState({
     amount: '',
@@ -31,6 +32,114 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
     if (!match) return value;
     const [, dd, mm, yyyy] = match;
     return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const categories = [
+    "Food",
+    "Travel",
+    "Bills",
+    "Entertainment",
+    "Shopping",
+    "Healthcare",
+    "Education",
+    "Other",
+  ];
+
+  const sanitizeAmountInput = (raw) => {
+    const v = String(raw || "").replace(/[^\d.]/g, "");
+    const firstDot = v.indexOf(".");
+    if (firstDot === -1) return v;
+    return v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, "");
+  };
+
+  const isValidTime = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return false;
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)) return true;
+    if (/^(?:0?[1-9]|1[0-2]):[0-5]\d\s?(?:AM|PM)$/i.test(raw)) return true;
+    return false;
+  };
+
+  const isValidIsoDate = (iso) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return false;
+    const [yyyy, mm, dd] = iso.split("-").map((x) => Number(x));
+    const dt = new Date(yyyy, mm - 1, dd);
+    if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    dt.setHours(0, 0, 0, 0);
+    return dt.getTime() <= today.getTime();
+  };
+
+  const validateManualField = (field, value) => {
+    const v = value ?? "";
+
+    if (field === "receiver") {
+      if (String(v).trim().length < 3) return "Receiver must be at least 3 characters.";
+    }
+
+    if (field === "sender") {
+      if (String(v).trim().length < 3) return "Sender must be at least 3 characters.";
+    }
+
+    if (field === "amount") {
+      const num = Number(v);
+      if (!Number.isFinite(num) || num <= 0) return "Amount must be a positive number.";
+    }
+
+    if (field === "category") {
+      if (!categories.includes(String(v))) return "Please select a valid category.";
+    }
+
+    if (field === "date") {
+      const iso = normalizeDateInput(String(v).trim());
+      if (!isValidIsoDate(iso)) return "Please enter a valid date.";
+    }
+
+    if (field === "time") {
+      if (!isValidTime(v)) return "Invalid time format.";
+    }
+
+    if (field === "transaction_id") {
+      const text = String(v).trim();
+      if (text && text.length < 4) return "Transaction ID must be at least 4 characters.";
+    }
+
+    return "";
+  };
+
+  const validateManualAll = (data) => {
+    const next = {};
+    for (const field of ["receiver", "amount", "sender", "category", "date", "time", "transaction_id"]) {
+      const msg = validateManualField(field, data[field]);
+      if (msg) next[field] = msg;
+    }
+    return next;
+  };
+
+  const handleManualChange = (field, rawValue) => {
+    let nextValue = rawValue;
+
+    if (field === "amount") nextValue = sanitizeAmountInput(rawValue);
+    if (field === "date") {
+      const cleaned = String(rawValue || "")
+        .replace(/[^\d/\-]/g, "")
+        .replace(/^[^\d]+/, "")
+        .slice(0, 10);
+      nextValue = normalizeDateInput(cleaned);
+    }
+    if (field === "time") nextValue = String(rawValue || "").replace(/[^\d:\sAPMapm]/g, "").toUpperCase();
+
+    const nextData = { ...manualData, [field]: nextValue };
+    setManualData(nextData);
+
+    const errorMsg = validateManualField(field, nextValue);
+    setManualErrors((prev) => {
+      const updated = { ...(prev || {}) };
+      if (errorMsg) updated[field] = errorMsg;
+      else delete updated[field];
+      return updated;
+    });
   };
 
   function handleFileChange(event) {
@@ -113,7 +222,7 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
         }, 3000);
       } else {
         setStatus("error");
-        setMessage(data.status || "❌ Failed to process file");
+        setMessage(data.message || data.status || "❌ Failed to process file");
       }
     } catch (error) {
       console.error(error);
@@ -130,11 +239,22 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
         router.push('/login');
         return;
       }
+
+      const allErrors = validateManualAll(manualData);
+      setManualErrors(allErrors);
+      if (Object.keys(allErrors).length > 0) {
+        setStatus("error");
+        setMessage("Please fix the highlighted fields.");
+        return;
+      }
+
       setStatus("uploading");
       setMessage("Saving transaction...");
       const payload = {
         ...manualData,
-        amount: Number(manualData.amount || 0)
+        amount: Number(manualData.amount || 0),
+        date: normalizeDateInput(manualData.date),
+        time: String(manualData.time || "").trim(),
       };
       if (!payload.amount || !payload.receiver) {
         setStatus("error");
@@ -160,6 +280,7 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
         category: 'Other',
         transaction_id: ''
       });
+      setManualErrors({});
       if (onUploadSuccess) onUploadSuccess();
       router.refresh();
       setTimeout(() => {
@@ -256,6 +377,11 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
   void handleConfirmTransaction;
   void handleDiscardTransaction;
 
+  const isManualInvalid =
+    Object.keys(manualErrors || {}).length > 0 ||
+    !String(manualData.receiver || "").trim() ||
+    !String(manualData.amount || "").trim();
+
   return (
     <>
     <div className="mb-6 flex flex-wrap gap-2">
@@ -332,61 +458,109 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
 
     {activeSource === "manual" && (
       <form onSubmit={handleManualSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <input
-          type="text"
-          value={manualData.receiver}
-          onChange={(e) => setManualData({ ...manualData, receiver: e.target.value })}
-          placeholder="Receiver / Merchant"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-        />
-        <input
-          type="number"
-          value={manualData.amount}
-          onChange={(e) => setManualData({ ...manualData, amount: e.target.value })}
-          placeholder="Amount"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-        />
-        <input
-          type="text"
-          value={manualData.sender}
-          onChange={(e) => setManualData({ ...manualData, sender: e.target.value })}
-          placeholder="Sender"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-        />
-        <input
-          type="text"
-          value={manualData.category}
-          onChange={(e) => setManualData({ ...manualData, category: e.target.value })}
-          placeholder="Category"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-        />
+        <div className="space-y-1">
+          <input
+            type="text"
+            value={manualData.receiver}
+            onChange={(e) => handleManualChange("receiver", e.target.value)}
+            onBlur={(e) => handleManualChange("receiver", e.target.value)}
+            placeholder="Receiver / Merchant"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.receiver ? "border-rose-500" : "border-slate-200"
+            }`}
+          />
+          {manualErrors.receiver && <p className="text-[11px] text-rose-600">{manualErrors.receiver}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={manualData.amount}
+            onChange={(e) => handleManualChange("amount", e.target.value)}
+            onBlur={(e) => handleManualChange("amount", e.target.value)}
+            placeholder="Amount"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.amount ? "border-rose-500" : "border-slate-200"
+            }`}
+          />
+          {manualErrors.amount && <p className="text-[11px] text-rose-600">{manualErrors.amount}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <input
+            type="text"
+            value={manualData.sender}
+            onChange={(e) => handleManualChange("sender", e.target.value)}
+            onBlur={(e) => handleManualChange("sender", e.target.value)}
+            placeholder="Sender"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.sender ? "border-rose-500" : "border-slate-200"
+            }`}
+          />
+          {manualErrors.sender && <p className="text-[11px] text-rose-600">{manualErrors.sender}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <select
+            value={manualData.category}
+            onChange={(e) => handleManualChange("category", e.target.value)}
+            onBlur={(e) => handleManualChange("category", e.target.value)}
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.category ? "border-rose-500" : "border-slate-200"
+            }`}
+          >
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          {manualErrors.category && <p className="text-[11px] text-rose-600">{manualErrors.category}</p>}
+        </div>
         <div className="space-y-2">
           <input
             type="text"
             value={manualData.date}
-            onChange={(e) => setManualData({ ...manualData, date: normalizeDateInput(e.target.value) })}
+            onChange={(e) => handleManualChange("date", e.target.value)}
+            onBlur={(e) => handleManualChange("date", e.target.value)}
             placeholder="Date (YYYY-MM-DD or DD-MM-YYYY)"
-            className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.date ? "border-rose-500" : "border-slate-200"
+            }`}
           />
+          {manualErrors.date && <p className="text-[11px] text-rose-600">{manualErrors.date}</p>}
           <p className="text-xs text-slate-500">Format: `YYYY-MM-DD` (preferred) or `DD-MM-YYYY`</p>
         </div>
         <div className="space-y-2">
           <input
             type="text"
             value={manualData.time}
-            onChange={(e) => setManualData({ ...manualData, time: e.target.value })}
+            onChange={(e) => handleManualChange("time", e.target.value)}
+            onBlur={(e) => handleManualChange("time", e.target.value)}
             placeholder="Time (HH:MM)"
-            className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.time ? "border-rose-500" : "border-slate-200"
+            }`}
           />
+          {manualErrors.time && <p className="text-[11px] text-rose-600">{manualErrors.time}</p>}
           <p className="text-xs text-slate-500">Format: `HH:MM` (24-hour)</p>
         </div>
-        <input
-          type="text"
-          value={manualData.transaction_id}
-          onChange={(e) => setManualData({ ...manualData, transaction_id: e.target.value })}
-          placeholder="Transaction ID (optional)"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-        />
+        <div className="space-y-1">
+          <input
+            type="text"
+            value={manualData.transaction_id}
+            onChange={(e) => handleManualChange("transaction_id", e.target.value)}
+            onBlur={(e) => handleManualChange("transaction_id", e.target.value)}
+            placeholder="Transaction ID (optional)"
+            className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
+              manualErrors.transaction_id ? "border-rose-500" : "border-slate-200"
+            }`}
+          />
+          {manualErrors.transaction_id && (
+            <p className="text-[11px] text-rose-600">{manualErrors.transaction_id}</p>
+          )}
+        </div>
         <div className="md:col-span-2 flex flex-col sm:flex-row gap-3">
           <button
             type="button"
@@ -404,7 +578,7 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
           </button>
           <button
             type="submit"
-            disabled={status === "uploading"}
+            disabled={status === "uploading" || isManualInvalid}
             className="w-full bg-slate-900 text-white px-6 py-2 rounded-2xl hover:bg-slate-800 disabled:opacity-50"
           >
             {status === "uploading" ? "Saving..." : "Save Manual Entry"}
