@@ -11,6 +11,10 @@ export default function WealthPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [monthlyAmount, setMonthlyAmount] = useState(1000);
+  const [sipProjection, setSipProjection] = useState(null);
+  const [projectionError, setProjectionError] = useState(null);
+  const [uncategorizedTotal, setUncategorizedTotal] = useState(null);
 
   const supabase = createClient();
 
@@ -64,6 +68,57 @@ export default function WealthPanel() {
     fetchAdvice();
     return () => { ignore = true; };
   }, [currentUserId, taxRegime, risk]);
+
+  useEffect(() => {
+    let ignore = false;
+    const timeoutId = setTimeout(() => {
+      const fetchProjections = async () => {
+        setProjectionError(null);
+        try {
+          const params = new URLSearchParams({
+            monthly_amount: String(monthlyAmount),
+            years: '10',
+            annual_return: '12',
+            annual_amount: '10000',
+            interest_rate: '7.1'
+          });
+          const url = `http://127.0.0.1:8000/ai/calculate-projections?${params.toString()}`;
+          const response = await fetch(url);
+          if (!response.ok) throw new Error('Projection fetch failed');
+          const dataJson = await response.json();
+          if (!ignore) setSipProjection(dataJson?.sip || null);
+        } catch (err) {
+          if (!ignore) setProjectionError(err.message);
+        }
+      };
+      fetchProjections();
+    }, 300);
+    return () => {
+      ignore = true;
+      clearTimeout(timeoutId);
+    };
+  }, [monthlyAmount]);
+
+  useEffect(() => {
+    let ignore = false;
+    const fetchStats = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token || localStorage.getItem('sb-token');
+        if (!token) return;
+        const res = await fetch('http://127.0.0.1:8000/user/financial-stats', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        const stats = await res.json();
+        if (!ignore) setUncategorizedTotal(Number(stats?.uncategorized_total ?? 0));
+      } catch (_) {
+        if (!ignore) setUncategorizedTotal(null);
+      }
+    };
+    if (currentUserId) fetchStats();
+    return () => { ignore = true; };
+  }, [currentUserId]);
 
   return (
     <section className={`mb-8 bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6 transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
@@ -178,6 +233,27 @@ export default function WealthPanel() {
               💡
             </div>
             <h3 className="text-lg font-semibold text-blue-900">Investment Projections</h3>
+            {uncategorizedTotal !== null && Math.round(uncategorizedTotal) === Math.round(monthlyAmount) && (
+              <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                Opportunity Cost of Leaks
+              </span>
+            )}
+          </div>
+          <div className="mb-5 bg-white/60 rounded-lg p-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">Monthly Amount</label>
+            <div className="flex items-center gap-4">
+              <input
+                type="range"
+                min="500"
+                max="20000"
+                step="500"
+                value={monthlyAmount}
+                onChange={(e) => setMonthlyAmount(Number(e.target.value))}
+                className="w-full"
+              />
+              <span className="text-sm font-semibold text-slate-900">{formatINR(monthlyAmount)}</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">Adjust to see how your SIP grows over 10 years at 12%.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white/60 rounded-lg p-4">
@@ -187,8 +263,12 @@ export default function WealthPanel() {
             </div>
             <div className="bg-white/60 rounded-lg p-4">
               <h4 className="font-semibold text-slate-900 mb-2">SIP Maturity Example</h4>
-              <p className="text-sm text-slate-600 mb-2">Monthly investment of ₹1,000 for 10 years at 12% annual return</p>
-              <p className="text-2xl font-bold text-green-600">{formatINR(advice.sip_example_maturity)}</p>
+              <p className="text-sm text-slate-600 mb-2">Monthly investment of {formatINR(monthlyAmount)} for 10 years at 12% annual return</p>
+              <p className="text-2xl font-bold text-green-600">{formatINR(sipProjection?.maturity_amount || 0)}</p>
+              <p className="text-xs text-slate-600 mt-2">Potential Interest Earned: {formatINR(sipProjection?.total_interest || 0)}</p>
+              {projectionError && (
+                <p className="text-xs text-rose-600 mt-2">Projection unavailable. Please check backend.</p>
+              )}
             </div>
           </div>
         </div>

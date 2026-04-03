@@ -3,7 +3,7 @@ import { useRouter } from 'next/navigation';
 import { deleteTransactionAPI } from '../../lib/api.js';
 import { createClient } from '../../lib/supabase/client.js';
 
-export function DeleteButton({ id }) {
+export function DeleteButton({ id, onDeleted }) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -18,6 +18,9 @@ export function DeleteButton({ id }) {
         }
         
         await deleteTransactionAPI(id, session.access_token);
+        if (typeof onDeleted === 'function') {
+            await onDeleted();
+        }
         router.refresh(); // Refresh the list
     } catch(e) {
         console.error(e);

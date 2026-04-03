@@ -30,7 +30,16 @@ export async function deleteTransactionAPI(id, token) {
     }
   });
   if (res.status === 401) throw new Error("Unauthorized");
-  if (!res.ok) throw new Error("Failed to delete expense");
+  if (!res.ok) {
+    let detail = "Failed to delete expense";
+    try {
+      const error = await res.json();
+      detail = error.detail || detail;
+    } catch (_) {
+      // ignore JSON parse errors
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 

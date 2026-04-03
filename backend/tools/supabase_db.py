@@ -152,7 +152,20 @@ def delete_transaction(transaction_id: int, user_id: str) -> bool:
     supabase = get_supabase_client()
     
     result = supabase.table("transactions").delete().eq("id", transaction_id).eq("user_id", user_id).execute()
-    return len(result.data) > 0 if result.data else False
+    # Supabase may return an empty data list even when delete succeeds.
+    if result.data:
+        return len(result.data) > 0
+
+    # If no rows were returned, check if the record still exists.
+    check = (
+        supabase.table("transactions")
+        .select("id")
+        .eq("id", transaction_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return False if (check.data and len(check.data) > 0) else True
 
 def verify_user_token(token: str) -> dict:
     """Verify JWT token and get user info"""
@@ -227,3 +240,81 @@ def set_budget_limits(user_id: str, budget_limits: dict) -> dict:
     if not result.data:
         return {}
     return {row["category"]: float(row["amount"]) for row in result.data}
+
+
+def _format_inr(value: float) -> str:
+    """Format a number into a compact INR-ish string (e.g., 18000 -> ₹18k)."""
+    try:
+        num = float(value)
+    except Exception:
+        return "₹0"
+    abs_num = abs(num)
+    if abs_num >= 1_00_00_000:
+        return f"₹{abs_num/1_00_00_000:.1f}Cr".replace(".0", "")
+    if abs_num >= 1_00_000:
+        return f"₹{abs_num/1_00_000:.1f}L".replace(".0", "")
+    if abs_num >= 1000:
+        return f"₹{abs_num/1000:.1f}k".replace(".0", "")
+    return f"₹{abs_num:,.0f}"
+
+
+def get_financial_summary(user_id: str) -> str:
+    """Return a short financial summary string for a user."""
+    if not user_id:
+        return "No transactions found."
+
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("transactions")
+        .select("amount, category, receiver")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    rows = result.data or []
+    if not rows:
+        return "No transactions found."
+
+    # Total spent
+    total_spent = 0.0
+    category_totals = {}
+    largest_amount = -1.0
+    largest_receiver = None
+
+    for row in rows:
+        try:
+            amt = float(row.get("amount") or 0)
+        except Exception:
+            amt = 0.0
+        total_spent += amt
+
+        cat = row.get("category") or "Other"
+        category_totals[cat] = category_totals.get(cat, 0.0) + amt
+
+        if amt > largest_amount:
+            largest_amount = amt
+            largest_receiver = row.get("receiver") or "Unknown"
+
+    # Top 3 categories
+    top_cats = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+    if top_cats:
+        top_parts = []
+        for i, (cat, amt) in enumerate(top_cats):
+            amt_str = _format_inr(amt)
+            if i < 2:
+                top_parts.append(f"{cat} ({amt_str})")
+            else:
+                top_parts.append(f"and {cat} ({amt_str})")
+        top_categories_text = ", ".join(top_parts[:-1] + ([top_parts[-1]] if top_parts else []))
+    else:
+        top_categories_text = "None"
+
+    largest_text = "None"
+    if largest_amount >= 0 and largest_receiver:
+        largest_text = f"{_format_inr(largest_amount)} for \"{largest_receiver}\""
+
+    return (
+        f"You spent {_format_inr(total_spent)} total. "
+        f"Top categories: {top_categories_text}. "
+        f"Largest expense: {largest_text}."
+    )

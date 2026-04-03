@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Header, Query
 from tools.advisor import chat_with_advisor, process_statement_tool
-from tools.guru_content import ingest_guru_document, list_guru_documents
-from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token
+from tools.guru_content import ingest_guru_document, list_guru_documents, migrate_json_to_vector_db, query_guru_advice
+from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token, get_financial_summary
 from tools.analytics import (
     refresh_analysis,
     calculate_budget_adherence,
@@ -21,12 +21,26 @@ import shutil
 import pandas as pd
 import re
 from pydantic import BaseModel
+from langchain_core.messages import HumanMessage
+from tools.llm_config import get_llm
 from datetime import date, datetime
 from financial_engine import mf_api, calculators, advisor
 from tools.transaction_validation import TransactionConfirmModel
+from tools.finance_math import calculate_sip, calculate_ppf
 
 
 app = FastAPI()
+mentor_llm = get_llm()
+
+@app.on_event("startup")
+def run_guru_migration_on_startup():
+    """One-time migration of legacy guru chunks into vector DB."""
+    try:
+        result = migrate_json_to_vector_db()
+        print(f"GURU MIGRATION: migrated={result.get('migrated')} skipped={result.get('skipped')} errors={result.get('errors')}")
+    except Exception as e:
+        print(f"GURU MIGRATION ERROR: {e}")
+
 # Example endpoint to use the recommendation engine
 @app.get("/api/recommendation")
 async def get_recommendation(risk: str = Query(...), tax_regime: str = Query(...)):
@@ -46,6 +60,30 @@ async def get_recommendation(risk: str = Query(...), tax_regime: str = Query(...
         "sip_example_maturity": sip_example
     }
 
+@app.get("/ai/calculate-projections")
+def calculate_projections(
+    monthly_amount: float = Query(...),
+    years: float = Query(...),
+    annual_return: float = Query(12.0),
+    annual_amount: float = Query(...),
+    interest_rate: float = Query(7.1),
+):
+    """
+    Calculate SIP and PPF projections.
+    """
+    sip_maturity, sip_interest = calculate_sip(monthly_amount, years, annual_return)
+    ppf_maturity, ppf_interest = calculate_ppf(annual_amount, years, interest_rate)
+    return {
+        "sip": {
+            "maturity_amount": sip_maturity,
+            "total_interest": sip_interest,
+        },
+        "ppf": {
+            "maturity_amount": ppf_maturity,
+            "total_interest": ppf_interest,
+        },
+    }
+
 # Authentication model
 class AuthModel(BaseModel):
     token: str
@@ -61,6 +99,9 @@ class TransactionModel(BaseModel):
     category: Optional[str] = None
     ai_confidence: Optional[float] = 0.5
     corrected: Optional[bool] = False
+
+class MentorAdviceRequest(BaseModel):
+    user_query: str
 
 # Authentication dependency
 def get_current_user(authorization: str = Header(...)):
@@ -141,6 +182,59 @@ async def chat(data: dict, current_user: dict = Depends(get_current_user)):
     except Exception as e:
         print(f"CHAT ERROR: {e}") # This prints the error in your terminal
         return {"response": "The advisor is temporarily unavailable. Check terminal for errors."}
+
+@app.post("/ai/mentor-advice")
+async def mentor_advice(payload: MentorAdviceRequest, authorization: Optional[str] = Header(None)):
+    """Return mentor-style advice based on financial summary + guru snippets."""
+    user_id = None
+    if authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+        token = authorization.split(" ")[1]
+
+        try:
+            user = verify_user_token(token)
+        except Exception as e:
+            print(f"MENTOR AUTH ERROR: {e}")
+            raise HTTPException(status_code=500, detail="Authentication system error.")
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token or session expired")
+
+        user_id = user["id"] if isinstance(user, dict) else getattr(user, "id", None)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Unable to resolve user id")
+    else:
+        # Testing mode: default user id for Swagger without token
+        user_id = "b7f7b030-2095-407e-997f-bfd6308cd3dc"
+
+    user_query = (payload.user_query or "").strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="user_query is required")
+
+    financial_summary = get_financial_summary(user_id)
+    guru_snippets = query_guru_advice(user_query, user_id)
+    if not guru_snippets:
+        guru_snippets = query_guru_advice(user_query, "9e52cb5e-38bb-41b0-9878-ab70e0b842e6")
+
+    snippets_text = "\n".join(guru_snippets) if guru_snippets else "None"
+
+    prompt = (
+        "System: You are an elite, blunt Financial Mentor.\n"
+        f"User Spending Facts: {financial_summary}\n"
+        f"Expert Guru Wisdom: {snippets_text}\n"
+        f"User Question: {user_query}\n\n"
+        "Task: Provide a 3-step actionable plan. Highlight the \"Uncategorized\" spending (~₹12.9k) "
+        "if it dominates the budget. Be direct."
+    )
+
+    try:
+        response = mentor_llm.invoke([HumanMessage(content=prompt)])
+        content = response.content.strip() if hasattr(response, "content") else str(response)
+        return {"response": content}
+    except Exception as e:
+        print(f"MENTOR ADVICE ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate mentor advice")
 
 @app.post("/upload")
 async def upload(
@@ -722,6 +816,35 @@ def get_spending_patterns_endpoint(current_user: dict = Depends(get_current_user
         return patterns
     except Exception as e:
         print(f"SPENDING PATTERNS ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/user/financial-stats")
+def get_financial_stats(current_user: dict = Depends(get_current_user)):
+    """Return basic financial stats for the authenticated user."""
+    try:
+        user_id = current_user["id"]
+        # Call existing summary logic for consistency (string result not used directly here).
+        _ = get_financial_summary(user_id)
+
+        transactions = get_user_transactions(user_id) or []
+        total_spent = 0.0
+        uncategorized_total = 0.0
+        for tx in transactions:
+            try:
+                amt = float(tx.get("amount") or 0)
+            except Exception:
+                amt = 0.0
+            total_spent += amt
+            category = str(tx.get("category") or "").strip().lower()
+            if category == "uncategorized":
+                uncategorized_total += amt
+
+        return {
+            "uncategorized_total": round(uncategorized_total, 2),
+            "total_spent": round(total_spent, 2)
+        }
+    except Exception as e:
+        print(f"FINANCIAL STATS ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

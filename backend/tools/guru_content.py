@@ -1,7 +1,12 @@
 import os
 import json
 import uuid
+import time
 from typing import List, Dict, Optional
+
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_chroma import Chroma
+from google import genai
 
 try:
     import PyPDF2
@@ -17,8 +22,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 GURU_DIR = os.path.join(DATA_DIR, 'guru_docs')
+VECTOR_DB_DIR = os.path.join(DATA_DIR, 'guru_vector_db')
 
 os.makedirs(GURU_DIR, exist_ok=True)
+os.makedirs(VECTOR_DB_DIR, exist_ok=True)
 
 
 def _safe_slug(value: str) -> str:
@@ -93,6 +100,124 @@ def _save_index(user_id: str, records: List[Dict]) -> None:
     with open(_index_path(user_id), 'w', encoding='utf-8') as f:
         json.dump(records, f, indent=2)
 
+def _get_vector_db(user_id: str) -> Chroma:
+    """Get (or create) a Chroma collection for a user."""
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+    collection_name = f"guru_{user_id}"
+    return Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=VECTOR_DB_DIR,
+    )
+
+def _chunk_id(user_id: str, doc_id: str, chunk_index: int) -> str:
+    """Deterministic chunk id to avoid duplicates across migrations."""
+    return f"{user_id}:{doc_id}:{chunk_index}"
+
+def migrate_json_to_vector_db() -> Dict[str, int]:
+    """
+    Migrate existing *.chunks.json files into the vector DB.
+    Returns a summary dict with counts.
+    """
+    migrated = 0
+    skipped = 0
+    errors = 0
+
+    if not os.path.exists(GURU_DIR):
+        return {"migrated": 0, "skipped": 0, "errors": 0}
+
+    # Scan all user folders under data/guru_docs/
+    for user_id in os.listdir(GURU_DIR):
+        user_path = os.path.join(GURU_DIR, user_id)
+        if not os.path.isdir(user_path):
+            continue
+
+        # Load index to map doc_id -> metadata
+        records = _load_index(user_id)
+        record_map = {r.get("id"): r for r in records if r.get("id")}
+
+        # Walk user folder to find chunks.json
+        for root, _dirs, files in os.walk(user_path):
+            for fname in files:
+                if not fname.endswith(".chunks.json"):
+                    continue
+
+                chunks_path = os.path.join(root, fname)
+
+                # Try to extract doc_id from filename: <safe_title>_<doc_id>.chunks.json
+                doc_id = None
+                base = fname[:-len(".chunks.json")]
+                if "_" in base:
+                    doc_id = base.split("_")[-1]
+
+                record = record_map.get(doc_id) if doc_id else None
+                guru_name = record.get("guru") if record else None
+                guru_slug = record.get("guru_slug") if record else None
+                doc_title = record.get("title") if record else base
+
+                try:
+                    with open(chunks_path, 'r', encoding='utf-8') as f:
+                        chunks = json.load(f) or []
+                except Exception:
+                    errors += 1
+                    continue
+
+                if not chunks:
+                    continue
+
+                vectordb = _get_vector_db(user_id)
+                texts = []
+                metadatas = []
+                ids = []
+
+                # Build ids and metadata
+                for idx, chunk in enumerate(chunks):
+                    cid = _chunk_id(user_id, doc_id or "unknown", idx)
+                    ids.append(cid)
+                    texts.append(chunk)
+                    metadatas.append({
+                        "user_id": user_id,
+                        "doc_id": doc_id or "unknown",
+                        "guru": guru_name or "Unknown",
+                        "guru_slug": guru_slug or _safe_slug(guru_name or "unknown"),
+                        "title": doc_title or "Unknown",
+                        "chunk_index": idx,
+                        "source": "migration",
+                    })
+
+                # Prevent duplicates: add only missing ids
+                try:
+                    existing = set()
+                    # Chroma supports id lookup via collection.get
+                    existing_result = vectordb._collection.get(ids=ids)
+                    for existing_id in existing_result.get("ids", []) or []:
+                        existing.add(existing_id)
+                except Exception:
+                    existing = set()
+
+                new_texts = []
+                new_metadatas = []
+                new_ids = []
+                for text, meta, cid in zip(texts, metadatas, ids):
+                    if cid in existing:
+                        skipped += 1
+                        continue
+                    new_texts.append(text)
+                    new_metadatas.append(meta)
+                    new_ids.append(cid)
+
+                if new_texts:
+                    try:
+                        vectordb.add_texts(new_texts, metadatas=new_metadatas, ids=new_ids)
+                        migrated += len(new_texts)
+                        time.sleep(1)
+                    except Exception as e:
+                        errors += len(new_texts)
+                        print(f"GURU MIGRATION WARNING: embedding failed for {chunks_path}: {e}")
+                
+                time.sleep(1)
+
+    return {"migrated": migrated, "skipped": skipped, "errors": errors}
 
 def ingest_guru_document(user_id: str, guru: str, file_path: str, title: Optional[str] = None) -> Dict:
     guru_slug = _safe_slug(guru)
@@ -111,9 +236,19 @@ def ingest_guru_document(user_id: str, guru: str, file_path: str, title: Optiona
     text = _extract_text_from_file(stored_path)
     chunks = _chunk_text(text)
 
-    chunks_path = os.path.join(user_dir, f'{safe_title}_{doc_id}.chunks.json')
-    with open(chunks_path, 'w', encoding='utf-8') as f:
-        json.dump(chunks, f)
+    # Store chunks in vector DB instead of chunks.json
+    vectordb = _get_vector_db(user_id)
+    metadatas = []
+    for idx, chunk in enumerate(chunks):
+        metadatas.append({
+            "doc_id": doc_id,
+            "guru": guru,
+            "guru_slug": guru_slug,
+            "title": title or os.path.basename(file_path),
+            "chunk_index": idx,
+        })
+    if chunks:
+        vectordb.add_texts(chunks, metadatas=metadatas)
 
     record = {
         'id': doc_id,
@@ -121,8 +256,8 @@ def ingest_guru_document(user_id: str, guru: str, file_path: str, title: Optiona
         'guru_slug': guru_slug,
         'title': title or os.path.basename(file_path),
         'file_path': stored_path,
-        'chunks_path': chunks_path,
-        'chunk_count': len(chunks)
+        'chunk_count': len(chunks),
+        'vector_collection': f"guru_{user_id}",
     }
 
     index = _load_index(user_id)
@@ -155,24 +290,21 @@ def get_guru_snippets(user_id: str, guru: str, query: str, limit: int = 3) -> Li
     records = list_guru_documents(user_id, guru=guru)
     if not records:
         return []
+    vectordb = _get_vector_db(user_id)
+    results = vectordb.similarity_search(
+        query,
+        k=limit,
+        filter={"guru_slug": _safe_slug(guru)}
+    )
+    return [r.page_content for r in results]
 
-    terms = [t.strip().lower() for t in query.split() if len(t.strip()) > 2]
-    candidates = []
 
-    for record in records:
-        chunks_path = record.get('chunks_path')
-        if not chunks_path or not os.path.exists(chunks_path):
-            continue
-        with open(chunks_path, 'r', encoding='utf-8') as f:
-            chunks = json.load(f)
-        for chunk in chunks:
-            score = _score_chunk(chunk, terms)
-            if score > 0:
-                candidates.append((score, chunk))
-
-    if not candidates:
+def query_guru_advice(user_query: str, user_id: str) -> List[str]:
+    """
+    Perform similarity search in the user's vector DB and return top 3 snippets.
+    """
+    if not user_query or not user_id:
         return []
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    top = [c[1] for c in candidates[:limit]]
-    return top
+    vectordb = _get_vector_db(user_id)
+    results = vectordb.similarity_search(user_query, k=3)
+    return [r.page_content for r in results]

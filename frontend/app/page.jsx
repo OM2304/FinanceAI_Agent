@@ -560,7 +560,7 @@ export default function Home() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-slate-900">INR {tx.amount}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                          <DeleteButton id={tx.id} />
+                          <DeleteButton id={tx.id} onDeleted={loadExpenses} />
                         </td>
                       </tr>
                     ))}
