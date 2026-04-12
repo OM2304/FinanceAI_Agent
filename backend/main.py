@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Header, Query
 from tools.advisor import chat_with_advisor, process_statement_tool
 from tools.guru_content import ingest_guru_document, list_guru_documents, migrate_json_to_vector_db, query_guru_advice
-from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token, get_financial_summary
+from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token, get_financial_summary, save_chat_message, get_chat_history
 from tools.analytics import (
     refresh_analysis,
     calculate_budget_adherence,
@@ -21,16 +21,16 @@ import shutil
 import pandas as pd
 import re
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage
 from tools.llm_config import get_llm
+from tools.math_engine import calculate_sip, calculate_ppf, IndiaTaxEngine, get_tax_recommendations, create_math_tools
 from datetime import date, datetime
 from financial_engine import mf_api, calculators, advisor
 from tools.transaction_validation import TransactionConfirmModel
-from tools.finance_math import calculate_sip, calculate_ppf
+from langchain.agents import create_agent
 
 
 app = FastAPI()
-mentor_llm = get_llm()
+math_tools = create_math_tools()
 
 @app.on_event("startup")
 def run_guru_migration_on_startup():
@@ -71,16 +71,18 @@ def calculate_projections(
     """
     Calculate SIP and PPF projections.
     """
-    sip_maturity, sip_interest = calculate_sip(monthly_amount, years, annual_return)
-    ppf_maturity, ppf_interest = calculate_ppf(annual_amount, years, interest_rate)
+    sip_result = calculate_sip(monthly_amount, years, annual_return)
+    ppf_result = calculate_ppf(annual_amount, years, interest_rate)
     return {
         "sip": {
-            "maturity_amount": sip_maturity,
-            "total_interest": sip_interest,
+            "maturity_amount": sip_result.get("maturity_amount", 0.0),
+            "total_interest": sip_result.get("total_interest", 0.0),
+            "total_invested": sip_result.get("total_invested", 0.0),
         },
         "ppf": {
-            "maturity_amount": ppf_maturity,
-            "total_interest": ppf_interest,
+            "maturity_amount": ppf_result.get("maturity_amount", 0.0),
+            "total_interest": ppf_result.get("total_interest", 0.0),
+            "total_invested": ppf_result.get("total_invested", 0.0),
         },
     }
 
@@ -219,22 +221,70 @@ async def mentor_advice(payload: MentorAdviceRequest, authorization: Optional[st
 
     snippets_text = "\n".join(guru_snippets) if guru_snippets else "None"
 
-    prompt = (
+    system_prompt = (
         "System: You are an elite, blunt Financial Mentor.\n"
         f"User Spending Facts: {financial_summary}\n"
         f"Expert Guru Wisdom: {snippets_text}\n"
         f"User Question: {user_query}\n\n"
-        "Task: Provide a 3-step actionable plan. Highlight the \"Uncategorized\" spending (~₹12.9k) "
-        "if it dominates the budget. Be direct."
+        "TONE RULES:\n"
+        "- If the user says 'Hi', 'Hello', or 'How are you', respond warmly and briefly.\n"
+        "- If the user asks about money, taxes, or logic, switch to a Blunt, Elite Financial Mentor voice.\n\n"
+        "FORMAT RULES (STRICT):\n"
+        "- NO bulky paragraphs. Every section must be separated by whitespace.\n"
+        "- Use '###' for main section headings.\n"
+        "- Use '*' or '-' for actionable steps or lists.\n"
+        "- Use **bold** for specific numbers or critical warnings.\n"
+        "- Use blockquotes (>) for expert quotes or 'Guru Wisdom'.\n"
+        "- Use single newlines for bullet points and double newlines only between major sections.\n"
+        "- Do not return JSON. Return only Markdown-formatted text.\n\n"
+        "TASK:\n"
+        "Provide a 3-step actionable plan. Highlight the \"Uncategorized\" spending (~INR 12.9k) "
+        "if it dominates the budget. Be direct.\n\n"
+        "MATH POLICY:\n"
+        "You are strictly forbidden from doing calculations yourself. "
+        "If any calculation is required, extract inputs (amount, rate, time, etc.), "
+        "call a math_engine tool, and ONLY summarize tool outputs."
     )
 
     try:
-        response = mentor_llm.invoke([HumanMessage(content=prompt)])
-        content = response.content.strip() if hasattr(response, "content") else str(response)
-        return {"response": content}
+        mentor_llm = get_llm(tools=math_tools)
+        mentor_agent = create_agent(
+            model=mentor_llm,
+            tools=math_tools,
+            system_prompt=system_prompt,
+        )
+        response = mentor_agent.invoke({"messages": [("user", user_query)]})
+        response = response["messages"][-1]
+        try:
+            save_chat_message(user_id, "user", user_query)
+            save_chat_message(user_id, "ai", response.text)
+        except Exception as save_err:
+            print(f"CHAT HISTORY SAVE ERROR: {save_err}")
+
+        return {"response": response.text}
     except Exception as e:
         print(f"MENTOR ADVICE ERROR: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate mentor advice")
+
+
+@app.get("/ai/chat-history")
+def chat_history(current_user: dict = Depends(get_current_user)):
+    """Fetch the last 50 mentor chat messages for the authenticated user."""
+    try:
+        rows = get_chat_history(current_user["id"], limit=50)
+        # Return in chronological order (oldest -> newest)
+        messages = [
+            {
+                "role": row.get("role"),
+                "text": row.get("message"),
+                "created_at": row.get("created_at"),
+            }
+            for row in reversed(rows)
+        ]
+        return {"messages": messages}
+    except Exception as e:
+        print(f"CHAT HISTORY ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch chat history")
 
 @app.post("/upload")
 async def upload(
@@ -1072,10 +1122,9 @@ async def tax_saving_plan(data: dict, current_user: dict = Depends(get_current_u
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid numeric values")
         
-        from financial_engine.tax_advisor import get_recommendations
-        recommendation = get_recommendations(annual_income, existing_80c)
-        
-        from financial_engine.tax_advisor import IndiaTaxEngine
+        recommendation_payload = get_tax_recommendations(annual_income, existing_80c)
+        recommendation = recommendation_payload.get("tax_saving_recommendation")
+
         engine = IndiaTaxEngine()
         tax_new = engine.calculate_new_regime_tax(annual_income)
         tax_old = engine.calculate_old_regime_tax(annual_income, existing_80c, 0)

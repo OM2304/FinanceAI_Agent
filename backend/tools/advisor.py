@@ -34,6 +34,7 @@ from tools.analytics import (
 from tools.data_processor import load_budget_limits
 from tools.supabase_db import get_budget_limits
 from tools.guru_content import get_guru_snippets
+from tools.math_engine import create_math_tools
 
 # ==================================================================
 # 2. GLOBAL PROCESSING FUNCTIONS
@@ -188,7 +189,6 @@ if BASE_DIR not in sys.path:
 
 from tools.llm_config import get_llm
 
-llm = get_llm()
 
 # ==================================================================
 # 2. TOOLS GENERATOR
@@ -330,12 +330,15 @@ def create_tools(user_id: str):
             
         return f"✅ Statement processed! Successfully imported {count} new transactions into your records."
         
+    math_tools = create_math_tools()
+
     return [
         budget_status_check,
         spending_analytics_tool,
         analyze_trends_tool,
         process_receipt_tool,
-        process_statement_tool
+        process_statement_tool,
+        *math_tools,
     ]
 
 # ==================================================================
@@ -573,6 +576,11 @@ def chat_with_advisor(user_input: str, user_id: str, guru_preference: Optional[s
         - Section 5 (Motivation): Short encouraging note with a standard educational disclaimer, 1 sentence.
         
         CONSTRAINTS:
+        - MATH POLICY: You are strictly forbidden from doing calculations yourself.
+        - If any calculation is needed (interest, CAGR, EMI, burn rate, runway, inflation adjustment, percentages),
+          you MUST extract the inputs (amount, rate, time, etc.), call an appropriate math_engine tool,
+          and then ONLY summarize the tool output.
+        - If a tool result is missing required inputs, ask a concise follow-up question to gather them.
         - Use Indian financial context (INR, UPI, etc.).
         - NO specific stock/investment tips or buy/sell calls.
         - Tone must be motivational but educational.
@@ -594,8 +602,9 @@ def chat_with_advisor(user_input: str, user_id: str, guru_preference: Optional[s
     
     # 5. Create Agent with User-Bound Tools
     tools = create_tools(user_id)
+    llm_with_tools = get_llm(tools=tools)
     advisor_agent = create_agent(
-        model=llm,
+        model=llm_with_tools,
         tools=tools,
         system_prompt=system_prompt
     )

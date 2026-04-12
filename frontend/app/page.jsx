@@ -3,7 +3,7 @@
 import { UploadComponent } from './components/UploadComponent';
 import { ExpenseChart } from './components/ExpenseChart';
 import { DeleteButton } from './components/DeleteButton';
-import { AiAssistant } from './components/AiAssistant';
+import { MentorChat } from './components/MentorChat';
 import { BackendCharts } from './components/BackendCharts';
 import { BudgetPanel } from './components/BudgetPanel';
 import { GuruLibrary } from './components/GuruLibrary';
@@ -596,7 +596,7 @@ export default function Home() {
 
         {activeTab === 'assistant' && (
           <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
-            <AiAssistant />
+            <MentorChat />
           </section>
         )}
 

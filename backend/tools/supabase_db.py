@@ -188,7 +188,7 @@ def verify_user_token(token: str) -> dict:
             # For development, you could add a fallback here
             return {"id": "dev-user", "email": "dev@example.com"}  # Uncomment for testing
             # Return None to force re-authentication
-            return None
+            # return None
         return None
 
 
@@ -252,7 +252,7 @@ def _format_inr(value: float) -> str:
     if abs_num >= 1_00_00_000:
         return f"₹{abs_num/1_00_00_000:.1f}Cr".replace(".0", "")
     if abs_num >= 1_00_000:
-        return f"₹{abs_num/1_00_000:.1f}L".replace(".0", "")
+        return f"₹{abs_num/1_00_00_000:.1f}L".replace(".0", "")
     if abs_num >= 1000:
         return f"₹{abs_num/1000:.1f}k".replace(".0", "")
     return f"₹{abs_num:,.0f}"
@@ -318,3 +318,33 @@ def get_financial_summary(user_id: str) -> str:
         f"Top categories: {top_categories_text}. "
         f"Largest expense: {largest_text}."
     )
+
+
+def save_chat_message(user_id: str, role: str, message: str) -> dict:
+    """Save a chat message to chat_history."""
+    supabase = get_supabase_client()
+    
+    # Ensure 'ai' becomes 'assistant' to match the database CHECK constraint
+    db_role = 'assistant' if str(role).lower() == 'ai' else str(role)
+    
+    payload = {
+        "user_id": user_id,
+        "role": db_role,
+        "content": str(message),
+    }
+    result = supabase.table("chat_history").insert(payload).execute()
+    return result.data[0] if result.data else {}
+
+
+def get_chat_history(user_id: str, limit: int = 50) -> list:
+    """Fetch recent chat history for a user (most recent first)."""
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("chat_history")
+        .select("id,user_id,role,content,created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(int(limit))
+        .execute()
+    )
+    return result.data or []
