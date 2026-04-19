@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Pencil } from 'lucide-react';
 
 export function TransactionConfirmationModal({
   isOpen,
@@ -50,7 +51,6 @@ export function TransactionConfirmationModal({
   const [editedData, setEditedData] = useState(() =>
     extractedData ? { ...normalizedExtractedData, corrected: false } : null
   );
-  const [editingField, setEditingField] = useState(() => firstMissingField);
   const [validationErrors, setValidationErrors] = useState({});
   const [warnings, setWarnings] = useState({});
 
@@ -128,14 +128,15 @@ export function TransactionConfirmationModal({
     }
 
     if (field === 'date') {
-      if (!isValidDateDmy(String(value || ''))) {
+      const raw = String(value || '').trim();
+      if (raw && !isValidDateDmy(raw)) {
         errors[field] = 'Use DD/MM/YYYY';
       }
     }
 
     if (field === 'time') {
       const raw = String(value || '').trim();
-      if (!isValidTime(raw)) {
+      if (raw && !isValidTime(raw)) {
         errors[field] = 'Use HH:MM AM/PM';
       }
     }
@@ -159,7 +160,13 @@ export function TransactionConfirmationModal({
 
   const handleInputChange = (field, value, { validate = true } = {}) => {
     const nextValue =
-      field === 'date' ? sanitizeDateInput(value) : field === 'time' ? normalizeTimeInput(value) : value;
+      field === 'date'
+        ? sanitizeDateInput(value)
+        : field === 'time'
+          ? normalizeTimeInput(value)
+          : field === 'amount'
+            ? String(value || '').replace(/,/g, '').replace(/[^\d.\-]/g, '')
+            : value;
 
     const isManualCorrection = field === 'category' && nextValue !== extractedData?.category;
 
@@ -196,19 +203,40 @@ export function TransactionConfirmationModal({
   };
 
   const renderField = (field, label) => {
-    const isEditing = editingField === field;
     const hasError = validationErrors[field];
-    const hasWarning = warnings[field];
     const lowConfidence = isLowConfidence(field);
     const confidenceScore = editedData.confidence?.[field]
       ? (editedData.confidence[field] * 100).toFixed(0)
       : null;
 
+    const rawValue = editedData[field] ?? '';
+    const trimmed = String(rawValue || '').trim();
+    const isDateOrTime = field === 'date' || field === 'time';
+    const isValid =
+      field === 'date' ? isValidDateDmy(trimmed) : field === 'time' ? isValidTime(trimmed) : true;
+
+    const borderClass =
+      isDateOrTime && trimmed
+        ? (isValid ? (lowConfidence ? 'border-amber-300' : 'border-slate-200') : 'border-red-400')
+        : hasError
+          ? 'border-red-400'
+          : lowConfidence
+            ? 'border-amber-300'
+            : 'border-slate-200';
+
     return (
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-700">{label}</label>
+            <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+              {label}
+              <Pencil className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+            </label>
+            {field !== 'category' && lowConfidence && (
+              <span className="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                Low Confidence
+              </span>
+            )}
             {field === 'category' && confidenceScore && (
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
                 lowConfidence ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
@@ -216,55 +244,25 @@ export function TransactionConfirmationModal({
                 ML Confidence: {confidenceScore}%
               </span>
             )}
-            {field !== 'category' && lowConfidence && (
-              <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-semibold">
-                Low Confidence
-              </span>
-            )}
           </div>
-          {!isEditing && (
-            <button
-              onClick={() => setEditingField(field)}
-              className="text-xs text-slate-600 hover:text-slate-900 font-medium"
-            >
-              Edit
-            </button>
-          )}
         </div>
 
-        {isEditing ? (
+        <div className="relative">
           <input
-            type={field === 'amount' ? 'number' : 'text'}
-            value={editedData[field] || ''}
-            inputMode={field === 'date' ? 'numeric' : undefined}
+            type={field === 'amount' ? 'text' : 'text'}
+            value={rawValue}
+            inputMode={field === 'date' ? 'numeric' : field === 'amount' ? 'decimal' : undefined}
+            pattern={field === 'amount' ? '[0-9]*[.,]?[0-9]*' : undefined}
             placeholder={field === 'date' ? 'DD/MM/YYYY' : field === 'time' ? 'HH:MM AM/PM' : undefined}
             onChange={(e) => handleInputChange(field, e.target.value, { validate: true })}
-            onBlur={() => {
-              handleInputChange(field, editedData[field] || '', { validate: true });
-              setEditingField(null);
-            }}
-            className={`w-full px-3 py-2 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-900/20 text-slate-900 ${
-              hasError ? 'border-rose-500' : hasWarning ? 'border-amber-500' : 'border-slate-200'
-            }`}
-            autoFocus
+            onBlur={() => handleInputChange(field, editedData[field] || '', { validate: true })}
+            className={`w-full px-3 py-2 pr-10 border rounded-2xl bg-white focus:outline-none focus:ring-2 focus:ring-[#1e293b]/25 text-slate-900 ${borderClass}`}
+            autoFocus={field === firstMissingField}
           />
-        ) : (
-          <div className={`p-2 border rounded-2xl transition-colors ${
-            hasError ? 'border-rose-500 bg-rose-50' :
-            hasWarning ? 'border-amber-500 bg-amber-50' :
-            lowConfidence ? 'border-amber-300 bg-amber-50' :
-            'border-slate-200 bg-slate-50'
-          }`}>
-            <span className={`text-sm ${
-              hasError ? 'text-rose-700' : hasWarning ? 'text-amber-700' : 'text-slate-900'
-            }`}>
-              {editedData[field] || 'Not detected'}
-            </span>
-          </div>
-        )}
+        </div>
 
         {hasError && <p className="text-[11px] text-rose-600 mt-1">{hasError}</p>}
-        {hasWarning && <p className="text-[11px] text-amber-600 mt-1">{hasWarning}</p>}
+        {warnings[field] && <p className="text-[11px] text-amber-700 mt-1">{warnings[field]}</p>}
       </div>
     );
   };
@@ -341,7 +339,7 @@ export function TransactionConfirmationModal({
             </button>
           </div>
 
-          {(Object.keys(warnings).some((k) => warnings[k]) || Object.values(editedData.confidence || {}).some((v) => v < 0.7)) && (
+          {Object.values(editedData.confidence || {}).some((v) => v < 0.7) && (
             <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2">
               <span className="text-amber-600">!</span>
               <p className="text-xs text-amber-800 leading-relaxed">
