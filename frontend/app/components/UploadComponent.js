@@ -233,6 +233,14 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
         date: String(manualData.date || "").trim(),
         time: String(manualData.time || "").trim(),
       };
+
+      const transactionId = String(payload.transaction_id ?? "").trim();
+      if (transactionId === "") {
+        delete payload.transaction_id;
+      } else {
+        payload.transaction_id = transactionId;
+      }
+
       if (!payload.amount || !payload.receiver) {
         setStatus("error");
         setMessage("Amount and receiver are required.");

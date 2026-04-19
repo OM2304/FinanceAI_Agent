@@ -7,9 +7,9 @@ from enum import Enum
 from typing import Any, Optional
 
 try:
-    from pydantic.v1 import BaseModel, ValidationError, condecimal, constr, validator
+    from pydantic.v1 import BaseModel, ValidationError, Field, condecimal, constr, validator
 except Exception:  # pragma: no cover
-    from pydantic import BaseModel, ValidationError, condecimal, constr, validator
+    from pydantic import BaseModel, ValidationError, Field, condecimal, constr, validator
 
 
 class TransactionCategory(str, Enum):
@@ -89,9 +89,18 @@ class TransactionConfirmModel(BaseModel):
     date: date
     time: Optional[str] = None
     category: TransactionCategory = TransactionCategory.OTHER
-    transaction_id: Optional[constr(strip_whitespace=True, min_length=4)] = None  # type: ignore[valid-type]
+    transaction_id: Optional[str] = Field(None, description='Optional transaction reference')
     ai_confidence: float = 0.5
     corrected: bool = False
+
+    @validator("transaction_id", pre=True, always=True)
+    def _normalize_transaction_id(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return str(value)
 
     @validator("date", pre=True)
     def _parse_date(cls, value: Any) -> date:

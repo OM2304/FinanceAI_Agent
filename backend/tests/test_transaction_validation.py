@@ -75,6 +75,20 @@ class TestTransactionValidation(unittest.TestCase):
                 }
             )
 
+    def test_allows_blank_transaction_id(self):
+        tx = TransactionConfirmModel.parse_obj(
+            {
+                "amount": "10.00",
+                "receiver": "Demo Store",
+                "sender": "Self",
+                "date": "2026-03-29",
+                "time": "10:00",
+                "category": "Other",
+                "transaction_id": "",
+            }
+        )
+        self.assertIsNone(tx.transaction_id)
+
 
 if __name__ == "__main__":
     unittest.main()

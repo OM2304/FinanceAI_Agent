@@ -287,6 +287,64 @@ def calculate_budget_adherence(df: pd.DataFrame, budget_limits: dict = None) -> 
     return results
 
 
+def calculate_health_score(
+    df: pd.DataFrame,
+    budget_limits: Optional[dict] = None,
+    anomaly_zscore_threshold: float = 2.5,
+) -> int:
+    """Calculate a dynamic financial health score based on spending patterns.
+
+    Health = 100 - OtherSpendingPenalty - BudgetOverrun - AnomalyPenalty
+
+    - Deduct 10 if Other/Uncategorized is >20% of total spending.
+    - Deduct 5 for each transaction with z-score > anomaly_zscore_threshold.
+    - Deduct 15 for each category over its budget limit.
+    """
+    if df is None or df.empty:
+        return 0
+
+    df_local = df.copy()
+    amounts = pd.to_numeric(df_local.get("amount"), errors="coerce").fillna(0.0).astype(float)
+    total_spent = float(amounts.sum())
+    if total_spent <= 0:
+        return 0
+
+    categories = df_local.get("category")
+    other_mask = categories.astype(str).str.strip().str.lower().isin(
+        ["other", "uncategorized", "others"]
+    )
+    other_total = float(amounts[other_mask].sum())
+
+    health_score = 100
+    if other_total / total_spent > 0.20:
+        health_score -= 10
+
+    mean = float(amounts.mean()) if len(amounts) else 0.0
+    std = float(amounts.std(ddof=0)) if len(amounts) else 0.0
+    if std > 0:
+        zscores = (amounts - mean) / std
+        anomaly_count = int((zscores.abs() > float(anomaly_zscore_threshold)).sum())
+        health_score -= anomaly_count * 5
+
+    if budget_limits:
+        normalized_limits = {
+            str(k).strip().lower(): float(v or 0.0)
+            for k, v in (budget_limits.items() if isinstance(budget_limits, dict) else [])
+            if v is not None
+        }
+        spending_by_category = (
+            df_local.groupby(df_local["category"].astype(str).str.strip().str.lower())["amount"]
+            .sum()
+            .to_dict()
+        )
+        for category_name, limit_value in normalized_limits.items():
+            spent_amount = float(spending_by_category.get(category_name, 0.0))
+            if limit_value > 0 and spent_amount > limit_value:
+                health_score -= 15
+
+    return max(0, min(100, int(health_score)))
+
+
 # ==================================================================
 # C. VISUALIZATION
 # ==================================================================

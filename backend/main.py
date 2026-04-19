@@ -8,6 +8,7 @@ from tools.analytics import (
     build_budget_recommendations,
     build_predictive_financial_engine,
     calculate_average_daily_burn_rate,
+    calculate_health_score,
 )
 from tools.charts import refresh_analysis
 from tools.data_processor import load_and_clean_data, load_budget_limits, save_budget_limits
@@ -1243,24 +1244,16 @@ def _financial_stats_cached(user_id: str) -> dict:
     burn_stats = calculate_average_daily_burn_rate(df)
     daily_burn = float(burn_stats.get("average_daily_burn_rate") or 0.0)
 
-    # Dynamic health score:
-    # - subtract 5 points for every 1,000 INR of Uncategorized spending
-    # - subtract 1 point for every 100 INR that daily burn exceeds the user's daily budget
-    health_score = 100
-    health_score -= int(uncategorized_total // 1000) * 5
+    budget_limits = get_budget_limits(user_id) or {}
+    health_score = calculate_health_score(df, budget_limits=budget_limits)
 
     daily_budget = None
     try:
-        budget_limits = get_budget_limits(user_id) or {}
         monthly_budget = float(sum(float(v or 0) for v in budget_limits.values())) if budget_limits else 0.0
         if monthly_budget > 0:
             daily_budget = monthly_budget / 30.0
     except Exception:
         daily_budget = None
-
-    if daily_budget is not None and daily_burn > daily_budget:
-        health_score -= int((daily_burn - daily_budget) // 100)
-    health_score = max(0, min(100, health_score))
 
     return {
         "status": "ok",

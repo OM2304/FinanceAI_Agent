@@ -251,7 +251,7 @@ export default function Home() {
   const topCategoryMax = Math.max(1, ...(topCategories.map((c) => c.amount) || [1]));
   const largestCategory = topCategories[0]?.category || 'spending';
 
-  const gaugeColor = healthScore < 40 ? '#ef4444' : healthScore <= 70 ? '#f59e0b' : '#22c55e';
+  const gaugeColor = healthScore < 50 ? '#ef4444' : healthScore <= 80 ? '#f59e0b' : '#22c55e';
   const gaugeData = [
     { name: 'score', value: healthScore },
     { name: 'rest', value: Math.max(0, 100 - healthScore) },
