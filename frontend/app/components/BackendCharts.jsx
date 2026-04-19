@@ -94,7 +94,7 @@ export function BackendCharts() {
               }).catch(err => console.error('Error refreshing charts:', err));
             }
           }}
-          className="px-4 py-2 bg-slate-900 text-white rounded-2xl hover:bg-slate-800 text-sm font-medium shadow-md"
+          className="px-4 py-2 rounded-2xl border border-slate-200 text-slate-800 bg-transparent hover:bg-slate-50 text-sm font-medium shadow-sm"
         >
           Refresh All Charts
         </button>

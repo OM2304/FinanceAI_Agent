@@ -13,6 +13,8 @@ import {
   YAxis,
 } from 'recharts';
 
+const COLORS = ['#1e293b', '#4f46e5', '#0ea5e9', '#94a3b8', '#10b981'];
+
 const formatCurrency = (value) => {
   const num = Number(value || 0);
   return `INR ${num.toFixed(2)}`;
@@ -25,7 +27,7 @@ function DonutSparkline({
   secondaryLabel,
   secondaryValue,
   footnote,
-  colors = ['#0ea5e9', '#cbd5e1'],
+  colors = [COLORS[2], COLORS[3]],
 }) {
   const a = Number(primaryValue || 0);
   const b = Number(secondaryValue || 0);
@@ -37,18 +39,18 @@ function DonutSparkline({
   const primaryShare = Math.round((a / total) * 100);
 
   return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+    <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 shadow-sm shadow-slate-200/50">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{title}</p>
       <div className="mt-3 flex items-center gap-4">
-        <div className="h-20 w-20 shrink-0">
+        <div className="h-44 w-44 shrink-0">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={data}
                 dataKey="value"
                 nameKey="name"
-                innerRadius={22}
-                outerRadius={34}
+                innerRadius={60}
+                outerRadius={80}
                 stroke="none"
                 startAngle={90}
                 endAngle={-270}
@@ -113,7 +115,6 @@ export function SpendingPatterns({ data, loading, error }) {
 
   const categoryDistribution = Array.isArray(data?.category_distribution) ? data.category_distribution : [];
   const monthlyTrend = Array.isArray(data?.monthly_trend) ? data.monthly_trend : [];
-  const pieColors = ['#0ea5e9', '#22c55e', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#64748b'];
 
   return (
     <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
@@ -130,10 +131,10 @@ export function SpendingPatterns({ data, loading, error }) {
           secondaryLabel="Weekday"
           secondaryValue={weekday}
           footnote={`${weekendShare}% of spend happens on weekends.`}
-          colors={['#0ea5e9', '#dbeafe']}
+          colors={[COLORS[1], COLORS[0]]}
         />
 
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 shadow-sm shadow-slate-200/50">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Category Distribution</p>
           {categoryDistribution.length ? (
             <div className="mt-3 h-44">
@@ -143,12 +144,12 @@ export function SpendingPatterns({ data, loading, error }) {
                     data={categoryDistribution}
                     dataKey="value"
                     nameKey="name"
-                    innerRadius={42}
-                    outerRadius={70}
+                    innerRadius={60}
+                    outerRadius={80}
                     stroke="none"
                   >
                     {categoryDistribution.map((entry, idx) => (
-                      <Cell key={`${entry.name}-${idx}`} fill={pieColors[idx % pieColors.length]} />
+                      <Cell key={`${entry.name}-${idx}`} fill={COLORS[idx % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(val) => formatCurrency(val)} />
@@ -161,7 +162,7 @@ export function SpendingPatterns({ data, loading, error }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+      <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 shadow-sm shadow-slate-200/50">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Monthly Trend</p>
         {monthlyTrend.length ? (
           <div className="mt-3 h-48">
@@ -171,7 +172,7 @@ export function SpendingPatterns({ data, loading, error }) {
                 <XAxis dataKey="date" hide />
                 <YAxis tickFormatter={(v) => `${Math.round(v)}`} width={38} />
                 <Tooltip formatter={(val) => formatCurrency(val)} labelFormatter={() => ''} />
-                <Bar dataKey="value" fill="#0f172a" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="value" fill={COLORS[0]} radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.patches import FancyBboxPatch
 
 # --- Import Data Processing Utilities ---
 # Fix Import
@@ -290,9 +291,87 @@ def calculate_budget_adherence(df: pd.DataFrame, budget_limits: dict = None) -> 
 # C. VISUALIZATION
 # ==================================================================
 
+# Fintech chart styling (Matplotlib)
+_FINTECH_PRIMARY = "#1e293b"   # navy/slate
+_FINTECH_SECONDARY = "#3b82f6" # blue
+_FINTECH_ACCENT = "#94a3b8"    # slate
+_FINTECH_PALETTE = [
+    _FINTECH_PRIMARY,
+    _FINTECH_SECONDARY,
+    "#4f46e5",  # indigo accent (frontend palette parity)
+    "#0ea5e9",  # cyan accent (frontend palette parity)
+    _FINTECH_ACCENT,
+]
+
+
+def _apply_fintech_mpl_style() -> None:
+    # Prefer Inter when available, fall back to common sans fonts.
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Inter", "DejaVu Sans", "Arial", "Liberation Sans"],
+        "axes.titlesize": 15,
+        "axes.titleweight": "semibold",
+        "axes.labelsize": 11,
+        "axes.labelcolor": _FINTECH_PRIMARY,
+        "xtick.color": _FINTECH_PRIMARY,
+        "ytick.color": _FINTECH_PRIMARY,
+        "axes.edgecolor": _FINTECH_ACCENT,
+        "axes.linewidth": 0.8,
+        "grid.color": _FINTECH_ACCENT,
+        "grid.alpha": 0.22,
+        "grid.linestyle": "-",
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+    })
+
+
+def _style_axes(ax) -> None:
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(_FINTECH_ACCENT)
+    ax.spines["bottom"].set_color(_FINTECH_ACCENT)
+    ax.tick_params(axis="both", which="both", labelsize=10)
+    ax.set_axisbelow(True)
+
+
+def _round_bar_patches(ax, rounding_size: float = 4.0) -> None:
+    # Matplotlib bars are rectangles; replace with rounded FancyBboxPatch.
+    # Note: corner rounding is best-effort and depends on backend.
+    patches = list(getattr(ax, "patches", []) or [])
+    for patch in patches:
+        try:
+            x = float(patch.get_x())
+            y = float(patch.get_y())
+            width = float(patch.get_width())
+            height = float(patch.get_height())
+        except Exception:
+            continue
+
+        if width == 0 or height == 0:
+            continue
+
+        facecolor = patch.get_facecolor()
+        zorder = patch.get_zorder()
+        patch.remove()
+
+        rounded = FancyBboxPatch(
+            (x, y),
+            width,
+            height,
+            boxstyle=f"round,pad=0,rounding_size={rounding_size}",
+            linewidth=0,
+            facecolor=facecolor,
+            edgecolor="none",
+            mutation_aspect=1,
+        )
+        rounded.set_zorder(zorder)
+        ax.add_patch(rounded)
+
 def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List[str]:
     if df.empty:
         return ['Error: Cannot generate charts, data is empty.']
+
+    _apply_fintech_mpl_style()
     
     # Define user-specific paths
     user_bar_path = os.path.join(OUTPUT_DIR, f'{user_id}_total_spending_by_category_bar_chart.png')
@@ -308,33 +387,43 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
     print(f"Category data:\n{category_data}")
     
     plt.figure(figsize=(12, 7))
-    ax = category_data.plot(kind='bar', color='teal', width=0.7, edgecolor='darkblue', linewidth=1.5)
+    ax = category_data.plot(kind='bar', color=_FINTECH_SECONDARY, width=0.68, edgecolor='none', linewidth=0)
+    _style_axes(ax)
+    _round_bar_patches(ax, rounding_size=4.0)
     
     # Format y-axis to show currency
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'₹{x:,.0f}'))
     
     # Set labels and title
-    plt.xlabel('Expense Category', fontsize=13, fontweight='bold')
-    plt.ylabel('Total Amount (INR)', fontsize=13, fontweight='bold')
-    plt.title('Total Spending by Category', fontsize=16, fontweight='bold', pad=20)
+    plt.xlabel('Expense Category', fontsize=11, fontweight='semibold')
+    plt.ylabel('Total Amount (INR)', fontsize=11, fontweight='semibold')
+    plt.title('Total Spending by Category', fontsize=15, fontweight='semibold', pad=14, color=_FINTECH_PRIMARY)
     
     # Rotate x-axis labels
     plt.xticks(rotation=45, ha='right')
     
     # Add grid
-    plt.grid(True, alpha=0.3, axis='y', linestyle='--')
+    plt.grid(True, axis='y')
     
     # Add value labels on top of bars
     for i, (category, value) in enumerate(category_data.items()):
-        plt.text(i, value, f'₹{value:,.0f}', 
-                ha='center', va='bottom', fontsize=10, fontweight='bold')
+        plt.text(
+            i,
+            value,
+            f'₹{value:,.0f}',
+            ha='center',
+            va='bottom',
+            fontsize=9,
+            fontweight='semibold',
+            color=_FINTECH_PRIMARY,
+        )
     
     # Ensure y-axis starts at 0
     plt.ylim(bottom=0, top=category_data.max() * 1.15)
     
     plt.tight_layout()
     plt.savefig(user_bar_path, dpi=150, bbox_inches='tight', facecolor='white')
-    plt.close()
+    plt.close('all')
     print(f"✅ Bar chart saved successfully to {user_bar_path}")
 
     # --- Monthly Trend Line Chart ---
@@ -342,28 +431,45 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         # Prepare DataFrame for Line Chart
         df_line = df.copy()
         
-        # Ensure datetime column is properly typed
+        # Ensure datetime is properly typed (avoid epoch/1970-ish defaults).
+        dt_series = None
         if 'datetime' in df_line.columns:
-            df_line['datetime'] = pd.to_datetime(df_line['datetime'])
+            dt_series = pd.to_datetime(df_line['datetime'], errors="coerce")
+        elif 'date' in df_line.columns:
+            dt_series = pd.to_datetime(df_line['date'], dayfirst=True, errors="coerce")
 
+        if dt_series is None:
+            raise ValueError("No datetime/date column available for line chart")
+
+        df_line["__dt"] = dt_series
+        df_line = df_line.dropna(subset=["__dt"])
         if df_line.empty:
-            raise ValueError("No valid datetime data available after filtering")
+            raise ValueError("No valid datetime data available after parsing")
         
         print(f"Total records for line chart: {len(df_line)}")
-        print(f"Date range: {df_line['datetime'].min()} to {df_line['datetime'].max()}")
-        print(f"Year range: {df_line['datetime'].dt.year.min()} to {df_line['datetime'].dt.year.max()}")
+        print(f"Date range: {df_line['__dt'].min()} to {df_line['__dt'].max()}")
+        print(f"Year range: {df_line['__dt'].dt.year.min()} to {df_line['__dt'].dt.year.max()}")
         
         # Set datetime as index and sort
-        df_line = df_line.set_index('datetime').sort_index()
+        df_line = df_line.set_index('__dt').sort_index()
         
         # Resample to month-end compatible frequency
         monthly_data = df_line['amount'].resample('M').sum()
-        
-        # Filter out dates that are clearly wrong (before 2000 or after 2100)
-        monthly_data = monthly_data[
-            (monthly_data.index.year >= 2000) & 
-            (monthly_data.index.year <= 2100)
-        ]
+        if monthly_data.empty or len(monthly_data) == 0:
+            raise ValueError("No monthly data to plot after resampling")
+
+        # If pandas produced an "epoch-ish" year (e.g., 1970/1971), remap to current year month-ends.
+        current_year = date_cls.today().year
+        if (monthly_data.index.year.min() < 2000) or (monthly_data.index.year.max() > 2100):
+            monthly_data.index = pd.to_datetime([
+                (pd.Timestamp(current_year, int(ts.month), 1) + pd.offsets.MonthEnd(0))
+                for ts in monthly_data.index
+            ])
+            monthly_data = monthly_data.groupby(monthly_data.index).sum().sort_index()
+
+        # Fill missing months between min/max to avoid odd jumps/labels.
+        full_index = pd.date_range(monthly_data.index.min(), monthly_data.index.max(), freq="M")
+        monthly_data = monthly_data.reindex(full_index, fill_value=0.0)
         
         # Debug: Print info about the data
         print(f"Monthly data points: {len(monthly_data)}")
@@ -380,11 +486,22 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         plt.figure(figsize=(12, 7))
         
         # Plot the line chart
-        ax = monthly_data.plot(kind='line', marker='o', linestyle='-', color='purple', 
-                               linewidth=3, markersize=10, figsize=(12, 7))
+        ax = monthly_data.plot(
+            kind='line',
+            marker='o',
+            linestyle='-',
+            color=_FINTECH_SECONDARY,
+            linewidth=2.6,
+            markersize=6,
+            figsize=(12, 7),
+        )
+        _style_axes(ax)
         
         # Format x-axis dates properly
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        if monthly_data.index.year.nunique() <= 1:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+        else:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
         
         # Set locator based on number of months
         num_months = len(monthly_data)
@@ -399,12 +516,12 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         plt.xticks(rotation=45, ha='right')
         
         # Set labels and title
-        plt.xlabel('Month', fontsize=13, fontweight='bold')
-        plt.ylabel('Total Amount (INR)', fontsize=13, fontweight='bold')
-        plt.title('Monthly Spending Trend', fontsize=16, fontweight='bold', pad=20)
+        plt.xlabel('Month', fontsize=11, fontweight='semibold')
+        plt.ylabel('Total Amount (INR)', fontsize=11, fontweight='semibold')
+        plt.title('Monthly Spending Trend', fontsize=15, fontweight='semibold', pad=14, color=_FINTECH_PRIMARY)
         
         # Add grid
-        plt.grid(True, alpha=0.3, linestyle='--')
+        plt.grid(True, axis="y")
         
         # Format y-axis to show currency
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'₹{x:,.0f}'))
@@ -417,18 +534,10 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         else:
             plt.ylim(bottom=y_min * 1.1, top=y_max * 1.1)
         
-        # Add value labels on points
-        for i, (date, value) in enumerate(zip(monthly_data.index, monthly_data.values)):
-            plt.annotate(f'₹{value:,.0f}', 
-                        (date, value),
-                        textcoords="offset points", 
-                        xytext=(0,10), 
-                        ha='center',
-                        fontsize=9,
-                        bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+
         plt.tight_layout()
         plt.savefig(user_line_path, dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
+        plt.close('all')
         print(f"✅ Line chart saved successfully to {user_line_path}")
         
     except Exception as e:
@@ -441,26 +550,28 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         plt.xlabel('Month')
         plt.ylabel('Total Amount (INR)')
         plt.savefig(user_line_path, dpi=100, bbox_inches='tight')
-        plt.close()
+        plt.close('all')
 
     # NEW: Pie Chart - Spending Distribution
     if not category_data.empty:
         try:
             plt.figure(figsize=(10, 8))
-            colors = plt.cm.Set3.colors
+            colors = _FINTECH_PALETTE
             wedges, texts, autotexts = plt.pie(category_data.values, labels=category_data.index, autopct='%1.1f%%', 
-                    colors=colors, startangle=90)
+                    colors=[colors[i % len(colors)] for i in range(len(category_data.values))],
+                    startangle=90,
+                    wedgeprops=dict(linewidth=0))
             
             # Make percentage text darker for better visibility
             for autotext in autotexts:
                 autotext.set_color('white')
-                autotext.set_fontweight('bold')
+                autotext.set_fontweight('semibold')
                 autotext.set_fontsize(10)
             
-            plt.title('Spending Distribution by Category', fontsize=16, fontweight='bold', pad=20, color='#333333')
+            plt.title('Spending Distribution by Category', fontsize=15, fontweight='semibold', pad=14, color=_FINTECH_PRIMARY)
             plt.tight_layout()
             plt.savefig(user_pie_path, dpi=150, bbox_inches='tight', facecolor='white')
-            plt.close()
+            plt.close('all')
             print(f"✅ Pie chart saved successfully to {user_pie_path}")
         except Exception as e:
             print(f"Error generating pie chart: {e}")
@@ -472,29 +583,30 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
             plt.title('Spending Distribution by Category')
             plt.tight_layout()
             plt.savefig(user_pie_path, dpi=100, bbox_inches='tight')
-            plt.close()
+            plt.close('all')
 
     # NEW: Top Merchants Chart
     try:
         merchant_data = df.groupby('description')['amount'].sum().sort_values(ascending=False).head(10)
         if not merchant_data.empty:
             plt.figure(figsize=(12, 8))
-            merchant_data.plot(kind='barh', color='orange', edgecolor='darkred', linewidth=1.5)
-            plt.title('Top 10 Merchants by Spending', fontsize=16, fontweight='bold', pad=20, color='#333333')
-            plt.xlabel('Total Amount (INR)', fontsize=13, fontweight='bold', color='#333333')
+            ax = merchant_data.plot(kind='barh', color=_FINTECH_SECONDARY, edgecolor='none', linewidth=0)
+            _style_axes(ax)
+            _round_bar_patches(ax, rounding_size=4.0)
+            plt.title('Top 10 Merchants by Spending', fontsize=15, fontweight='semibold', pad=14, color=_FINTECH_PRIMARY)
+            plt.xlabel('Total Amount (INR)', fontsize=11, fontweight='semibold', color=_FINTECH_PRIMARY)
             
             # Format x-axis to show currency
-            ax = plt.gca()
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'₹{x:,.0f}'))
             
             # Add value labels
             for i, (merchant, value) in enumerate(merchant_data.items()):
                 plt.text(value, i, f'₹{value:,.0f}', 
-                        ha='left', va='center', fontsize=9, fontweight='bold', color='#333333')
+                        ha='left', va='center', fontsize=9, fontweight='semibold', color=_FINTECH_PRIMARY)
             
             plt.tight_layout()
             plt.savefig(user_merchants_path, dpi=150, bbox_inches='tight', facecolor='white')
-            plt.close()
+            plt.close('all')
             print(f"✅ Merchants chart saved successfully to {user_merchants_path}")
         else:
             print("No merchant data available for chart generation")
@@ -508,19 +620,19 @@ def generate_spending_charts(df: pd.DataFrame, user_id: str = "default") -> List
         plt.title('Top 10 Merchants by Spending')
         plt.tight_layout()
         plt.savefig(user_merchants_path, dpi=100, bbox_inches='tight')
-        plt.close()
+        plt.close('all')
     
     return [user_bar_path, user_line_path, user_pie_path, user_merchants_path]
 
 #To redraw charts after data updation
 def refresh_analysis(user_id: str):
     """Helper for the Agent: Reloads data and recreates all charts."""
-    df = load_and_clean_data(user_id)
-    if not df.empty:
-        generate_spending_charts(df, user_id)
-        print(f"📈 Analytics and Charts Refreshed for user {user_id}!")
-        return True
-    return False
+    try:
+        from tools.charts import refresh_analysis as refresh_charts
+    except ImportError:
+        from backend.tools.charts import refresh_analysis as refresh_charts
+
+    return bool(refresh_charts(user_id))
 
 
 # ==================================================================

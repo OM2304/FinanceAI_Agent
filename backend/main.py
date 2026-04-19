@@ -3,19 +3,20 @@ from tools.advisor import chat_with_advisor, process_statement_tool
 from tools.guru_content import ingest_guru_document, list_guru_documents, migrate_json_to_vector_db, query_guru_advice
 from tools.supabase_db import save_transaction, get_user_transactions, delete_transaction, verify_user_token, get_budget_limits, set_budget_limits, get_splitwise_token, set_splitwise_token, get_financial_summary, save_chat_message, get_chat_history
 from tools.analytics import (
-    refresh_analysis,
     calculate_budget_adherence,
     get_spending_patterns,
     build_budget_recommendations,
     build_predictive_financial_engine,
     calculate_average_daily_burn_rate,
 )
+from tools.charts import refresh_analysis
 from tools.data_processor import load_and_clean_data, load_budget_limits, save_budget_limits
 from tools.splitwise_client import get_groups, get_expenses as splitwise_get_expenses, get_group, get_current_user as splitwise_current_user, build_authorize_url, exchange_code_for_token, create_expense
 from tools.splitwise_analytics import summarize_group_expenses
 from financial_engine import mf_api, calculators, advisor as wealth_advisor
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from typing import Optional
 import os
 import shutil
@@ -369,6 +370,9 @@ PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 REPORTS_DIR = os.path.join(DATA_DIR, 'reports')
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# Serve generated charts from the exact reports directory for persistence/debugging.
+app.mount("/static/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
 
 CHART_PATH_BAR = os.path.join(REPORTS_DIR, 'total_spending_by_category_bar_chart.png')
 CHART_PATH_LINE = os.path.join(REPORTS_DIR, 'monthly_spending_trend_line_chart.png')

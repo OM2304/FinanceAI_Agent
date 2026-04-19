@@ -326,7 +326,7 @@ export function MentorChat({ guruId: controlledGuruId, onGuruChange } = {}) {
           type="button"
           onClick={handleNewChat}
           disabled={resettingChat || loading}
-          className="w-full mb-4 px-4 py-3 text-sm font-semibold rounded-xl bg-[#0f172a] text-white hover:bg-[#1e293b] disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full mb-4 px-4 py-3 text-sm font-semibold rounded-xl bg-[#1e293b] text-white hover:bg-[#0f172a] disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {resettingChat ? 'Saving...' : 'New Chat'}
         </button>
@@ -347,8 +347,8 @@ export function MentorChat({ guruId: controlledGuruId, onGuruChange } = {}) {
                 onClick={() => handleSelectChat(chat, key)}
                 className={`w-full text-left px-3 py-2 rounded-xl border text-sm ${
                   isActive
-                    ? 'border-slate-400 bg-slate-100 text-[#0f172a]'
-                    : 'border-slate-300/80 bg-white hover:bg-slate-50 text-slate-700'
+                    ? 'border-slate-200 bg-slate-50 text-[#1e293b]'
+                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600'
                 }`}
               >
                 <span className="block min-w-0 truncate">{snippet}</span>
@@ -362,7 +362,7 @@ export function MentorChat({ guruId: controlledGuruId, onGuruChange } = {}) {
         <div className="p-4 border-b border-slate-300/70 bg-white/80">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Mentor</p>
-            <h2 className="text-lg font-semibold text-[#0f172a]">Financial Mentor</h2>
+            <h2 className="text-lg font-semibold text-[#1e293b]">Financial Mentor</h2>
           </div>
         </div>
 
@@ -372,8 +372,8 @@ export function MentorChat({ guruId: controlledGuruId, onGuruChange } = {}) {
               <div
                 className={`min-w-0 max-w-[85%] px-4 py-3 rounded-2xl text-sm whitespace-pre-wrap break-words [word-break:break-word] leading-[1.4] ${
                   m.role === 'user'
-                    ? 'bg-[#0f172a] text-white rounded-br-md shadow'
-                    : 'bg-[#f8fafc] border border-slate-200 text-[#0f172a] rounded-bl-md shadow-sm'
+                    ? 'bg-[#1e293b] text-white rounded-br-md shadow'
+                    : 'bg-[#f8fafc] border border-slate-200 text-[#1e293b] rounded-bl-md shadow-sm'
                 }`}
               >
                 <ReactMarkdown
@@ -405,7 +405,7 @@ export function MentorChat({ guruId: controlledGuruId, onGuruChange } = {}) {
           <button
             onClick={handleSend}
             disabled={loading}
-            className="h-11 w-11 rounded-2xl bg-[#0f172a] text-white flex items-center justify-center hover:bg-[#1e293b] disabled:opacity-50"
+            className="h-11 w-11 rounded-2xl bg-[#1e293b] text-white flex items-center justify-center hover:bg-[#0f172a] disabled:opacity-50"
             aria-label="Send"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
