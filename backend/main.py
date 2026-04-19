@@ -8,6 +8,7 @@ from tools.analytics import (
     get_spending_patterns,
     build_budget_recommendations,
     build_predictive_financial_engine,
+    calculate_average_daily_burn_rate,
 )
 from tools.data_processor import load_and_clean_data, load_budget_limits, save_budget_limits
 from tools.splitwise_client import get_groups, get_expenses as splitwise_get_expenses, get_group, get_current_user as splitwise_current_user, build_authorize_url, exchange_code_for_token, create_expense
@@ -20,11 +21,15 @@ import os
 import shutil
 import pandas as pd
 import re
+import json
+import chromadb
+from functools import lru_cache
 from pydantic import BaseModel
 from tools.llm_config import get_llm
 from tools.math_engine import calculate_sip, calculate_ppf, IndiaTaxEngine, get_tax_recommendations, create_math_tools
 from datetime import date, datetime
 from financial_engine import mf_api, calculators, advisor
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from tools.transaction_validation import TransactionConfirmModel
 from langchain.agents import create_agent
 
@@ -104,6 +109,118 @@ class TransactionModel(BaseModel):
 
 class MentorAdviceRequest(BaseModel):
     user_query: str
+    guru_id: Optional[str] = None
+
+class ChatMessageInput(BaseModel):
+    role: str
+    text: str
+    guru_id: Optional[str] = None
+
+class SaveChatSessionRequest(BaseModel):
+    messages: list[ChatMessageInput]
+    guru_id: Optional[str] = None
+
+def _safe_slug(value: str) -> str:
+    value = str(value or "").strip().lower().replace(" ", "_")
+    allowed = []
+    for ch in value:
+        if ch.isalnum() or ch in ["_", "-"]:
+            allowed.append(ch)
+    return "".join(allowed) or "unknown"
+
+@lru_cache(maxsize=1)
+def _get_guru_embedding() -> GoogleGenerativeAIEmbeddings:
+    # Keep the model consistent with ingestion in tools.guru_content.
+    return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+
+def _query_persona_context(guru_id: Optional[str], user_query: str, user_id: str, k: int = 4) -> str:
+    """
+    Query ChromaDB for persona-specific context and return a short text blob.
+
+    Uses the existing persistent Chroma DB at ./data/guru_vector_db and filters
+    by metadata `guru_slug` where available.
+    """
+    if not guru_id or not user_query:
+        return ""
+
+    guru_slug = _safe_slug(guru_id)
+    embedding_fn = _get_guru_embedding()
+    try:
+        query_embedding = embedding_fn.embed_query(user_query)
+    except Exception as e:
+        print(f"RAG EMBEDDING ERROR: {e}")
+        return ""
+
+    # Prefer the user's collection if it exists; fall back to the shared guru collection.
+    collection_candidates = [
+        f"guru_{user_id}",
+        "guru_9e52cb5e-38bb-41b0-9878-ab70e0b842e6",
+    ]
+
+    for collection_name in collection_candidates:
+        try:
+            collection = CHROMA_CLIENT.get_collection(collection_name)
+        except Exception:
+            continue
+
+        try:
+            result = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=int(k),
+                where={"guru_slug": guru_slug},
+            )
+            docs = (result or {}).get("documents") or []
+            docs = docs[0] if docs and isinstance(docs[0], list) else []
+            docs = [d for d in docs if isinstance(d, str) and d.strip()]
+            if not docs:
+                continue
+            context = "\n\n".join(docs).strip()
+            return context[:4000]
+        except Exception as e:
+            print(f"RAG QUERY ERROR ({collection_name}): {e}")
+            continue
+
+    return ""
+
+def _sanitize_assistant_text(value: object) -> str:
+    """Best-effort: keep only assistant message text, strip metadata/extras/signatures."""
+    if value is None:
+        return ""
+
+    text = value if isinstance(value, str) else str(value)
+    text = text.strip()
+    if not text:
+        return ""
+
+    # If the model accidentally returned JSON, prefer its content-like field.
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                candidate = parsed.get("response") or parsed.get("text") or parsed.get("content")
+                if isinstance(candidate, str) and candidate.strip():
+                    text = candidate.strip()
+        except Exception:
+            pass
+
+    # Remove common signature blocks (PGP-like).
+    text = re.sub(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", "", text, flags=re.S).strip()
+
+    # Strip LangChain/LLM message repr metadata if it leaked into the string.
+    for marker in ("additional_kwargs=", "response_metadata=", "tool_calls=", "usage_metadata=", "id="):
+        idx = text.find(marker)
+        if idx > 0:
+            text = text[:idx].strip()
+
+    # If a metadata dict is appended after the answer, drop from the first such marker.
+    meta_match = re.search(r"\n\s*\{.*?(response_metadata|additional_kwargs|tool_calls)\".*", text, flags=re.S)
+    if meta_match:
+        text = text[:meta_match.start()].strip()
+
+    # Strip explicit signature lines.
+    text = re.sub(r"^\s*(signature|sig)\s*:\s*.*$", "", text, flags=re.I | re.M).strip()
+
+    return text
 
 # Authentication dependency
 def get_current_user(authorization: str = Header(...)):
@@ -147,6 +264,9 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 CHART_PATH_BAR = os.path.join(REPORTS_DIR, 'total_spending_by_category_bar_chart.png')
 CHART_PATH_LINE = os.path.join(REPORTS_DIR, 'monthly_spending_trend_line_chart.png')
+
+VECTOR_DB_DIR = os.path.join(DATA_DIR, "guru_vector_db")
+CHROMA_CLIENT = chromadb.PersistentClient(path=VECTOR_DB_DIR)
 
 app.add_middleware(
     CORSMiddleware,
@@ -214,17 +334,23 @@ async def mentor_advice(payload: MentorAdviceRequest, authorization: Optional[st
     if not user_query:
         raise HTTPException(status_code=400, detail="user_query is required")
 
+    guru_id = (payload.guru_id or "").strip() or None
     financial_summary = get_financial_summary(user_id)
-    guru_snippets = query_guru_advice(user_query, user_id)
-    if not guru_snippets:
-        guru_snippets = query_guru_advice(user_query, "9e52cb5e-38bb-41b0-9878-ab70e0b842e6")
 
-    snippets_text = "\n".join(guru_snippets) if guru_snippets else "None"
+    persona_context = _query_persona_context(guru_id, user_query, user_id) if guru_id else ""
+    guru_snippets = []
+    if not persona_context:
+        guru_snippets = query_guru_advice(user_query, user_id)
+        if not guru_snippets:
+            guru_snippets = query_guru_advice(user_query, "9e52cb5e-38bb-41b0-9878-ab70e0b842e6")
+
+    snippets_text = persona_context or ("\n".join(guru_snippets) if guru_snippets else "None")
 
     system_prompt = (
         "System: You are an elite, blunt Financial Mentor.\n"
         f"User Spending Facts: {financial_summary}\n"
-        f"Expert Guru Wisdom: {snippets_text}\n"
+        f"Selected Guru Persona: {guru_id or 'General'}\n"
+        f"Guru Document Context: {snippets_text}\n"
         f"User Question: {user_query}\n\n"
         "TONE RULES:\n"
         "- If the user says 'Hi', 'Hello', or 'How are you', respond warmly and briefly.\n"
@@ -255,13 +381,16 @@ async def mentor_advice(payload: MentorAdviceRequest, authorization: Optional[st
         )
         response = mentor_agent.invoke({"messages": [("user", user_query)]})
         response = response["messages"][-1]
+        assistant_text = _sanitize_assistant_text(getattr(response, "text", None))
+        if not assistant_text:
+            assistant_text = "No response."
         try:
-            save_chat_message(user_id, "user", user_query)
-            save_chat_message(user_id, "ai", response.text)
+            save_chat_message(user_id, "user", user_query, guru_id=guru_id)
+            save_chat_message(user_id, "ai", assistant_text, guru_id=guru_id)
         except Exception as save_err:
             print(f"CHAT HISTORY SAVE ERROR: {save_err}")
 
-        return {"response": response.text}
+        return {"response": assistant_text, "guru_id": guru_id}
     except Exception as e:
         print(f"MENTOR ADVICE ERROR: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate mentor advice")
@@ -276,8 +405,9 @@ def chat_history(current_user: dict = Depends(get_current_user)):
         messages = [
             {
                 "role": row.get("role"),
-                "text": row.get("message"),
+                "text": row.get("content") or row.get("message"),
                 "created_at": row.get("created_at"),
+                "guru_id": row.get("guru_id"),
             }
             for row in reversed(rows)
         ]
@@ -285,6 +415,30 @@ def chat_history(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         print(f"CHAT HISTORY ERROR: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch chat history")
+
+@app.post("/ai/chat-history/save-session")
+def save_chat_session(payload: SaveChatSessionRequest, current_user: dict = Depends(get_current_user)):
+    """Persist a list of chat messages for the authenticated user."""
+    try:
+        saved = 0
+        session_guru_id = (payload.guru_id or "").strip() or None
+        for item in payload.messages or []:
+            content = (item.text or "").strip()
+            if not content:
+                continue
+
+            normalized_role = (item.role or "").strip().lower()
+            if normalized_role not in {"user", "ai", "assistant"}:
+                normalized_role = "ai"
+
+            item_guru_id = (getattr(item, "guru_id", None) or "").strip() or session_guru_id or None
+            save_chat_message(current_user["id"], normalized_role, content, guru_id=item_guru_id)
+            saved += 1
+
+        return {"saved": saved}
+    except Exception as e:
+        print(f"SAVE CHAT SESSION ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save chat session")
 
 @app.post("/upload")
 async def upload(
@@ -515,6 +669,10 @@ async def confirm_transaction(data: dict, current_user: dict = Depends(get_curre
         
         # Save to Supabase
         result = save_transaction(current_user["id"], transaction_data)
+        try:
+            _financial_stats_cached.cache_clear()
+        except Exception:
+            pass
         
         # Refresh charts
         refresh_analysis(current_user["id"])
@@ -707,6 +865,10 @@ async def import_transactions_csv(
 
                 save_transaction(current_user["id"], transaction_data)
                 inserted += 1
+                try:
+                    _financial_stats_cached.cache_clear()
+                except Exception:
+                    pass
             except Exception as row_error:
                 errors.append({"row": int(idx) + 1, "error": str(row_error)})
 
@@ -822,10 +984,18 @@ def set_budget_limits_endpoint(data: dict, current_user: dict = Depends(get_curr
 
         try:
             saved = set_budget_limits(current_user["id"], cleaned)
+            try:
+                _financial_stats_cached.cache_clear()
+            except Exception:
+                pass
             return {"status": "Budget limits saved", "source": "db", "limits": saved}
         except Exception as db_error:
             print(f"SET BUDGET LIMITS DB ERROR: {db_error}")
             save_budget_limits(cleaned)
+            try:
+                _financial_stats_cached.cache_clear()
+            except Exception:
+                pass
             return {"status": "Budget limits saved", "source": "local", "limits": cleaned}
     except HTTPException:
         raise
@@ -868,34 +1038,114 @@ def get_spending_patterns_endpoint(current_user: dict = Depends(get_current_user
         print(f"SPENDING PATTERNS ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/user/spending-patterns")
+def get_user_spending_patterns(current_user: dict = Depends(get_current_user)):
+    """Spending patterns formatted for frontend consumption."""
+    try:
+        df = load_and_clean_data(current_user["id"])
+        patterns = get_spending_patterns(df)
+        if patterns.get("status") != "ok":
+            return patterns
+
+        df_local = df.copy()
+        df_local["weekday"] = df_local["datetime"].dt.weekday
+        weekend_total = float(df_local.loc[df_local["weekday"].isin([5, 6]), "amount"].sum())
+        weekday_total = float(df_local.loc[~df_local["weekday"].isin([5, 6]), "amount"].sum())
+        total_spent = float(df_local["amount"].sum())
+
+        patterns["weekend_vs_weekday"] = {
+            "weekend_total": round(weekend_total, 2),
+            "weekday_total": round(weekday_total, 2),
+            "weekend_share": round((weekend_total / total_spent) * 100, 2) if total_spent else 0.0,
+        }
+
+        distribution = (
+            df_local.groupby("category")["amount"]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        category_distribution = []
+        for category, amount in distribution.items():
+            amt = float(amount or 0.0)
+            category_distribution.append({
+                "category": str(category),
+                "amount": round(amt, 2),
+                "percent": round((amt / total_spent) * 100, 2) if total_spent else 0.0,
+            })
+        patterns["category_distribution"] = category_distribution
+
+        return patterns
+    except Exception as e:
+        print(f"USER SPENDING PATTERNS ERROR: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch spending patterns")
+
 @app.get("/user/financial-stats")
 def get_financial_stats(current_user: dict = Depends(get_current_user)):
     """Return basic financial stats for the authenticated user."""
     try:
-        user_id = current_user["id"]
-        # Call existing summary logic for consistency (string result not used directly here).
-        _ = get_financial_summary(user_id)
-
-        transactions = get_user_transactions(user_id) or []
-        total_spent = 0.0
-        uncategorized_total = 0.0
-        for tx in transactions:
-            try:
-                amt = float(tx.get("amount") or 0)
-            except Exception:
-                amt = 0.0
-            total_spent += amt
-            category = str(tx.get("category") or "").strip().lower()
-            if category == "uncategorized":
-                uncategorized_total += amt
-
-        return {
-            "uncategorized_total": round(uncategorized_total, 2),
-            "total_spent": round(total_spent, 2)
-        }
+        return _financial_stats_cached(current_user["id"])
     except Exception as e:
         print(f"FINANCIAL STATS ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@lru_cache(maxsize=32)
+def _financial_stats_cached(user_id: str) -> dict:
+    # Call existing summary logic for consistency (string result not used directly here).
+    _ = get_financial_summary(user_id)
+
+    transactions = get_user_transactions(user_id) or []
+    if not transactions:
+        return {
+            "status": "empty",
+            "uncategorized_total": 0.0,
+            "total_spent": 0.0,
+            "daily_burn": 0.0,
+            "health_score": 0,
+        }
+
+    if transactions:
+        df_tx = pd.DataFrame(transactions)
+        amounts = pd.to_numeric(df_tx["amount"] if "amount" in df_tx.columns else None, errors="coerce").fillna(0.0)
+        total_spent = float(amounts.sum())
+        if "category" in df_tx.columns:
+            categories = df_tx["category"].astype(str).str.strip().str.lower()
+            uncategorized_total = float(amounts[categories == "uncategorized"].sum())
+        else:
+            uncategorized_total = 0.0
+
+    df = load_and_clean_data(user_id)
+    burn_stats = calculate_average_daily_burn_rate(df)
+    daily_burn = float(burn_stats.get("average_daily_burn_rate") or 0.0)
+
+    # Dynamic health score:
+    # - subtract 5 points for every 1,000 INR of Uncategorized spending
+    # - subtract 1 point for every 100 INR that daily burn exceeds the user's daily budget
+    health_score = 100
+    health_score -= int(uncategorized_total // 1000) * 5
+
+    daily_budget = None
+    try:
+        budget_limits = get_budget_limits(user_id) or {}
+        monthly_budget = float(sum(float(v or 0) for v in budget_limits.values())) if budget_limits else 0.0
+        if monthly_budget > 0:
+            daily_budget = monthly_budget / 30.0
+    except Exception:
+        daily_budget = None
+
+    if daily_budget is not None and daily_burn > daily_budget:
+        health_score -= int((daily_burn - daily_budget) // 100)
+    health_score = max(0, min(100, health_score))
+
+    return {
+        "status": "ok",
+        "uncategorized_total": round(uncategorized_total, 2),
+        "total_spent": round(total_spent, 2),
+        "daily_burn": round(daily_burn, 2),
+        "daily_budget": round(float(daily_budget), 2) if daily_budget is not None else None,
+        "health_score": int(health_score),
+    }
 
 
 @app.get("/insights/predictive")
@@ -925,6 +1175,11 @@ def delete_expense(expense_id: int, current_user: dict = Depends(get_current_use
         success = delete_transaction(expense_id, current_user["id"])
         if not success:
             raise HTTPException(status_code=404, detail="Transaction not found")
+
+        try:
+            _financial_stats_cached.cache_clear()
+        except Exception:
+            pass
         
         # Refresh charts
         refresh_analysis(current_user["id"])

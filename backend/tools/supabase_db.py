@@ -320,7 +320,7 @@ def get_financial_summary(user_id: str) -> str:
     )
 
 
-def save_chat_message(user_id: str, role: str, message: str) -> dict:
+def save_chat_message(user_id: str, role: str, message: str, guru_id: str = None) -> dict:
     """Save a chat message to chat_history."""
     supabase = get_supabase_client()
     
@@ -332,6 +332,17 @@ def save_chat_message(user_id: str, role: str, message: str) -> dict:
         "role": db_role,
         "content": str(message),
     }
+    if guru_id:
+        payload["guru_id"] = str(guru_id)
+
+    # `guru_id` is optional and may not exist as a column in older DBs.
+    if guru_id:
+        try:
+            result = supabase.table("chat_history").insert(payload).execute()
+            return result.data[0] if result.data else {}
+        except Exception:
+            payload.pop("guru_id", None)
+
     result = supabase.table("chat_history").insert(payload).execute()
     return result.data[0] if result.data else {}
 
@@ -339,12 +350,23 @@ def save_chat_message(user_id: str, role: str, message: str) -> dict:
 def get_chat_history(user_id: str, limit: int = 50) -> list:
     """Fetch recent chat history for a user (most recent first)."""
     supabase = get_supabase_client()
-    result = (
-        supabase.table("chat_history")
-        .select("id,user_id,role,content,created_at")
-        .eq("user_id", user_id)
-        .order("created_at", desc=True)
-        .limit(int(limit))
-        .execute()
-    )
-    return result.data or []
+    try:
+        result = (
+            supabase.table("chat_history")
+            .select("id,user_id,role,content,created_at,guru_id")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(int(limit))
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        result = (
+            supabase.table("chat_history")
+            .select("id,user_id,role,content,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(int(limit))
+            .execute()
+        )
+        return result.data or []

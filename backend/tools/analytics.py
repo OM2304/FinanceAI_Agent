@@ -732,7 +732,7 @@ def detect_anomalies(
         }
 
     df_local = df.copy()
-    amounts = df_local["amount"].astype(float)
+    amounts = pd.to_numeric(df_local["amount"], errors="coerce").fillna(0.0)
 
     total_spent = float(amounts.sum())
     large_amt_threshold = float(total_spent * float(large_txn_share_threshold or 0))
@@ -740,26 +740,46 @@ def detect_anomalies(
     mean = float(amounts.mean()) if len(amounts) else 0.0
     std = float(amounts.std(ddof=0)) if len(amounts) else 0.0
 
-    def z_score(x: float) -> float:
-        if std <= 0:
-            return 0.0
-        return (float(x) - mean) / std
+    if std > 0:
+        zscores = (amounts - mean) / std
+    else:
+        zscores = pd.Series(0.0, index=df_local.index)
+
+    mask_z = zscores.abs() >= float(zscore_threshold or 0)
+    mask_large = (large_amt_threshold > 0) & (amounts >= large_amt_threshold)
+    mask_10000 = (amounts - 10000.0).abs() <= 0.01
+    flagged_mask = mask_z | mask_large | mask_10000
+
+    if not bool(flagged_mask.any()):
+        return {
+            "status": "ok",
+            "zscore_threshold": float(zscore_threshold),
+            "large_txn_share_threshold": float(large_txn_share_threshold),
+            "large_txn_amount_threshold": round(large_amt_threshold, 2),
+            "mean_amount": round(mean, 2),
+            "std_amount": round(std, 2),
+            "flagged_transactions": [],
+        }
+
+    flagged_df = df_local.loc[flagged_mask].copy()
+    flagged_df["_amount"] = amounts.loc[flagged_mask].astype(float)
+    flagged_df["_z_score"] = zscores.loc[flagged_mask].astype(float)
+    flagged_df["_abs_z"] = flagged_df["_z_score"].abs()
+    flagged_df.sort_values(["_abs_z", "_amount"], ascending=[False, False], inplace=True)
 
     flagged: List[Dict[str, Any]] = []
-    for _, row in df_local.iterrows():
-        amount = float(row.get("amount", 0) or 0)
-        z = z_score(amount)
+    # Use row-indexed access here; `itertuples()` can drop/rename underscore-prefixed fields.
+    for idx, row in flagged_df.iterrows():
+        amount = float(row.get("_amount", 0.0) or 0.0)
+        z = float(row.get("_z_score", 0.0) or 0.0)
 
         reasons: List[str] = []
-        if abs(z) >= float(zscore_threshold or 0):
+        if bool(mask_z.loc[idx]):
             reasons.append("zscore_outlier")
-        if large_amt_threshold > 0 and amount >= large_amt_threshold:
+        if bool(mask_large.loc[idx]):
             reasons.append("over_10pct_total")
-        if math.isclose(amount, 10000.0, rel_tol=0.0, abs_tol=0.01):
+        if bool(mask_10000.loc[idx]):
             reasons.append("amount_equals_10000")
-
-        if not reasons:
-            continue
 
         dt = row.get("datetime")
         dt_str = str(dt) if dt is not None else None
@@ -774,9 +794,6 @@ def detect_anomalies(
             "z_score": round(float(z), 4),
             "reasons": reasons,
         })
-
-    # Sort most "severe" first (absolute z-score, then amount)
-    flagged.sort(key=lambda x: (abs(float(x.get("z_score") or 0)), float(x.get("amount") or 0)), reverse=True)
 
     return {
         "status": "ok",

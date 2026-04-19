@@ -124,7 +124,7 @@ export async function fetchBudgetSummary(token) {
 }
 
 export async function fetchSpendingPatterns(token) {
-  const res = await fetch(`${API_URL}/insights/patterns`, {
+  const res = await fetch(`${API_URL}/user/spending-patterns`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (res.status === 401) throw new Error("Unauthorized");

@@ -1,25 +1,25 @@
 'use client'
 
 import { UploadComponent } from './components/UploadComponent';
-import { ExpenseChart } from './components/ExpenseChart';
 import { DeleteButton } from './components/DeleteButton';
 import { MentorChat } from './components/MentorChat';
 import { BackendCharts } from './components/BackendCharts';
 import { BudgetPanel } from './components/BudgetPanel';
 import { GuruLibrary } from './components/GuruLibrary';
 import { SplitwisePanel } from './components/SplitwisePanel';
-import AdvancedAnalytics from './components/AdvancedAnalytics';
 import WealthPanel from './components/WealthPanel';
 import TaxAdvisor from './components/TaxAdvisor';
 import { TransactionConfirmationModal } from './components/TransactionConfirmationModal';
-import { confirmTransaction, fetchExpenses } from '../lib/api';
+import { confirmTransaction, fetchExpenses, fetchPredictiveInsights } from '../lib/api';
 import { formatINR } from '../lib/formatters';
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from 'react';
+import { PieChart, Pie, Cell } from 'recharts';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '../lib/supabase/client';
 
 const ExportDropdown = dynamic(() => import('./components/ExportDropdown'), { ssr: false });
+const AdvancedAnalytics = lazy(() => import('./components/AdvancedAnalytics'));
 
 function parseTransactionDateTime(tx) {
   const dateRaw = String(tx?.date ?? '').trim();
@@ -75,6 +75,10 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('overview');
   const [theme, setTheme] = useState('light');
   const router = useRouter();
+  const [financialStats, setFinancialStats] = useState(null);
+  const [predictive, setPredictive] = useState(null);
+  const [currentBalance, setCurrentBalance] = useState('0');
+  const [guruId, setGuruId] = useState('ramit');
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
@@ -84,6 +88,35 @@ export default function Home() {
   const [confirmationSaving, setConfirmationSaving] = useState(false);
   const [confirmationError, setConfirmationError] = useState('');
   const [confirmationNonce, setConfirmationNonce] = useState(0);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('sb-token');
+      if (!token) return;
+
+      const res = await fetch('http://localhost:8000/user/financial-stats', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) throw new Error('Unauthorized');
+      if (!res.ok) throw new Error('Failed to fetch financial stats');
+      const data = await res.json();
+      setFinancialStats(data);
+    } catch (err) {
+      console.error('Failed to fetch financial stats', err);
+    }
+  }, []);
+
+  const loadPredictive = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('sb-token');
+      if (!token) return;
+
+      const data = await fetchPredictiveInsights(token);
+      setPredictive(data);
+    } catch (err) {
+      console.error('Failed to fetch predictive insights', err);
+    }
+  }, []);
 
   const loadExpenses = useCallback(async () => {
     try {
@@ -108,6 +141,10 @@ export default function Home() {
     }
   }, [router]);
 
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadExpenses(), loadStats(), loadPredictive()]);
+  }, [loadExpenses, loadPredictive, loadStats]);
+
   useEffect(() => {
     const token = localStorage.getItem('sb-token');
     if (!token) {
@@ -119,11 +156,36 @@ export default function Home() {
   }, [router, loadExpenses]);
 
   useEffect(() => {
+    const token = localStorage.getItem('sb-token');
+    if (!token) return;
+
+    loadStats();
+    loadPredictive();
+  }, [router, loadPredictive, loadStats]);
+
+  useEffect(() => {
     const stored = localStorage.getItem('theme');
     const initial = stored || 'light';
     setTheme(initial);
     document.documentElement.setAttribute('data-theme', initial);
   }, []);
+
+  useEffect(() => {
+    try {
+      const storedGuru = localStorage.getItem('mentor_chat_guru_id');
+      if (storedGuru) setGuruId(String(storedGuru).trim().toLowerCase());
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mentor_chat_guru_id', guruId);
+    } catch {
+      // ignore
+    }
+  }, [guruId]);
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -190,6 +252,61 @@ export default function Home() {
       });
   }, [expenses]);
 
+  const { totalAmount, malformedExpenseCount } = useMemo(() => {
+    let total = 0;
+    let malformed = 0;
+    for (const item of expenses ?? []) {
+      const raw = item?.amount;
+      const num = Number(raw);
+      if (!Number.isFinite(num)) {
+        malformed += 1;
+        continue;
+      }
+      total += num;
+    }
+    return { totalAmount: total, malformedExpenseCount: malformed };
+  }, [expenses]);
+
+  useEffect(() => {
+    if ((expenses?.length ?? 0) > 0 && totalAmount === 0 && malformedExpenseCount > 0) {
+      console.warn('Total spending is 0 due to malformed expense amounts.', {
+        malformedExpenseCount,
+        sample: expenses?.slice?.(0, 3),
+      });
+    }
+  }, [expenses, malformedExpenseCount, totalAmount]);
+  const totalCategories = useMemo(
+    () => [...new Set(expenses.map((e) => e.category))].length,
+    [expenses]
+  );
+  const healthScore = Number(financialStats?.health_score ?? 0);
+  const burnRate = Number(predictive?.burn_rate?.average_daily_burn_rate ?? financialStats?.daily_burn ?? 0);
+
+  const topCategories = useMemo(() => {
+    const totals = {};
+    for (const tx of expenses ?? []) {
+      const category = String(tx?.category ?? 'Uncategorized').trim() || 'Uncategorized';
+      totals[category] = (totals[category] ?? 0) + Number(tx?.amount ?? 0);
+    }
+    return Object.entries(totals)
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 3);
+  }, [expenses]);
+
+  const topCategoryMax = Math.max(1, ...(topCategories.map((c) => c.amount) || [1]));
+  const largestCategory = topCategories[0]?.category || 'spending';
+
+  const gaugeColor = healthScore < 40 ? '#ef4444' : healthScore <= 70 ? '#f59e0b' : '#22c55e';
+  const gaugeData = [
+    { name: 'score', value: healthScore },
+    { name: 'rest', value: Math.max(0, 100 - healthScore) },
+  ];
+
+  const numericBalance = Number(currentBalance ?? 0);
+  const safeBalance = Number.isFinite(numericBalance) ? numericBalance : 0;
+  const runwayDays = burnRate > 0 && safeBalance > 0 ? Math.floor(safeBalance / burnRate) : null;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center app-bg">
@@ -201,18 +318,14 @@ export default function Home() {
     );
   }
 
-  const totalAmount = expenses.reduce((sum, item) => sum + item.amount, 0);
-  const totalCategories = [...new Set(expenses.map((e) => e.category))].length;
-  const avgAmount = expenses.length > 0 ? (totalAmount / expenses.length).toFixed(2) : '0';
-
   return (
     <main className="min-h-screen app-bg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <header className="mb-10">
           <div className="flex flex-col gap-6">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-2xl bg-linear-to-br from-amber-400 via-rose-400 to-orange-500 shadow-lg shadow-orange-200/60 flex items-center justify-center text-white font-bold">
+                <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-slate-700 shadow-lg shadow-slate-300/40 flex items-center justify-center text-white font-bold">
                   FM
                 </div>
                 <div>
@@ -395,15 +508,15 @@ export default function Home() {
         </header>
 
         {!backendConnected && (
-          <section className="mb-8 bg-amber-50/80 border border-amber-200 p-4 rounded-2xl shadow-sm">
+          <section className="mb-8 bg-slate-50/90 border border-slate-200 p-4 rounded-2xl shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center text-amber-700 font-semibold">
+              <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-700 font-semibold">
                 !
               </div>
               <div>
-                <p className="font-semibold text-amber-900">Backend server is not running</p>
-                <p className="text-sm text-amber-700 mt-1">
-                  Start it with: <code className="bg-amber-100 px-2 py-1 rounded text-xs">cd backend && uvicorn main:app --reload</code>
+                <p className="font-semibold text-[#0f172a]">Backend server is not running</p>
+                <p className="text-sm text-slate-700 mt-1">
+                  Start it with: <code className="bg-slate-100 px-2 py-1 rounded text-xs">cd backend && uvicorn main:app --reload</code>
                 </p>
               </div>
             </div>
@@ -427,98 +540,110 @@ export default function Home() {
           <>
             <div className="flex justify-end mb-4">
               {/* Export button top right */}
-              <ExportDropdown transactions={sortedExpenses} totalAmount={totalAmount} />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Transactions</p>
-                <div className="mt-4 flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-semibold text-slate-900">{expenses.length}</p>
-                    <p className="text-sm text-slate-500">Synced entries</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 19V5M10 19V9M16 19V13M22 19V7" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Categories</p>
-                <div className="mt-4 flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-semibold text-slate-900">{totalCategories}</p>
-                    <p className="text-sm text-slate-500">Active buckets</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M5 12l7-7 7 7-7 7-7-7z" strokeLinecap="round" strokeLinejoin="round" />
-                      <circle cx="12" cy="12" r="2.5" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Avg Transaction</p>
-                <div className="mt-4 flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-semibold text-slate-900">{formatINR(avgAmount)}</p>
-                    <p className="text-sm text-slate-500">Mean expense</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 7h16v10H4z" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M4 10h16" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={refreshAll}
+                  className="px-4 py-2 text-sm font-semibold rounded-xl border border-slate-200 bg-white/90 text-slate-700 hover:bg-slate-100"
+                >
+                  Refresh Data
+                </button>
+                <ExportDropdown transactions={sortedExpenses} totalAmount={totalAmount} />
               </div>
             </div>
+            <section className="mb-6 bg-white/90 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-slate-900">Mentor&apos;s Brief</h2>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Intelligence</span>
+              </div>
+              {safeBalance <= 0 ? (
+                <p className="text-sm text-slate-800">
+                  I can&apos;t tell you how long you&apos;ll last without knowing your balance. Enter your cash on hand below.
+                </p>
+              ) : (
+                <p className="text-sm text-slate-800">
+                  At your current burn of <span className="font-semibold text-slate-900">₹{burnRate.toFixed(2)}</span>, your{' '}
+                  <span className="font-semibold text-slate-900">₹{safeBalance.toFixed(2)}</span> will vanish in{' '}
+                  <span className="font-semibold text-slate-900">{runwayDays ?? '—'}</span> days. This is a red alert.
+                </p>
+              )}
+            </section>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-slate-900">Spending by Category</h2>
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Live</span>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6 flex flex-col items-center justify-center">
+                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Financial Health</p>
+                <div className="relative mt-4">
+                  <PieChart width={220} height={220}>
+                    <Pie
+                      data={gaugeData}
+                      dataKey="value"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={70}
+                      outerRadius={90}
+                      startAngle={90}
+                      endAngle={-270}
+                      stroke="none"
+                    >
+                      <Cell fill={gaugeColor} />
+                      <Cell fill="#e5e7eb" />
+                    </Pie>
+                  </PieChart>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <p className="text-3xl font-semibold text-slate-900">{healthScore}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Score</p>
+                  </div>
                 </div>
-                <ExpenseChart data={expenses} />
               </section>
 
-              <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
+              <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-slate-900">Quick Insights</h2>
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Signals</span>
+                  <h2 className="text-lg font-semibold text-slate-900">Top Categories</h2>
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Focus</span>
                 </div>
-                <div className="space-y-3">
-                  {totalAmount > 20000 && (
-                    <div className="flex items-center gap-3 p-3 bg-rose-50 rounded-2xl border border-rose-100">
-                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                      <p className="text-sm text-rose-800">High spending detected. Consider saving 20% more.</p>
-                    </div>
+                <div className="space-y-4">
+                  {topCategories.length > 0 ? (
+                    topCategories.map((row) => {
+                      const pct = Math.min(100, (row.amount / topCategoryMax) * 100);
+                      return (
+                        <div key={row.category}>
+                          <div className="flex items-center justify-between text-sm text-slate-700">
+                            <span className="font-semibold text-slate-900">{row.category}</span>
+                            <span>{formatINR(row.amount)}</span>
+                          </div>
+                          <div className="mt-2 h-2 rounded-full bg-slate-100">
+                            <div
+                              className="h-2 rounded-full bg-slate-900"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-slate-500">No categories yet.</p>
                   )}
-                  {expenses.some((e) => e.category === 'Food') && (
-                    <div className="flex items-center gap-3 p-3 bg-amber-50 rounded-2xl border border-amber-100">
-                      <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                      <p className="text-sm text-amber-800">Food expenses are high. Try meal planning.</p>
-                    </div>
-                  )}
-                  {expenses.length > 0 && (
-                    <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-2xl border border-blue-100">
-                      <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                      <p className="text-sm text-blue-800">
-                        Most recent: {formatINR(sortedExpenses[0]?.amount)} ({sortedExpenses[0]?.category})
-                      </p>
-                    </div>
-                  )}
-                  {expenses.length === 0 && (
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                      <span className="h-2.5 w-2.5 rounded-full bg-slate-400" />
-                      <p className="text-sm text-slate-800">No transactions yet. Upload your first receipt.</p>
-                    </div>
-                  )}
+                </div>
+              </section>
+
+              <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-lg shadow-slate-200/60 p-6 space-y-4">
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Daily Burn</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">{formatINR(burnRate)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Runway (Days)</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                    {runwayDays === null || runwayDays === undefined ? '—' : String(runwayDays)}
+                  </p>
+                  <label className="mt-3 block text-[11px] text-slate-500">Total Cash on Hand</label>
+                  <input
+                    value={currentBalance}
+                    onChange={(e) => setCurrentBalance(e.target.value)}
+                    placeholder="e.g. 50000"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-300"
+                    inputMode="decimal"
+                  />
                 </div>
               </section>
             </div>
@@ -584,7 +709,9 @@ export default function Home() {
 
         {activeTab === 'advanced' && (
           <section className="bg-white/40 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
-            <AdvancedAnalytics expenses={sortedExpenses} totalAmount={totalAmount} />
+            <Suspense fallback={<div className="text-sm text-slate-600">Loading analytics...</div>}>
+              <AdvancedAnalytics expenses={sortedExpenses} />
+            </Suspense>
           </section>
         )}
 
@@ -596,7 +723,26 @@ export default function Home() {
 
         {activeTab === 'assistant' && (
           <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
-            <MentorChat />
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Guru Persona</div>
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 p-2">
+                {['ramit', 'kiyosaki', 'buffett'].map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setGuruId(id)}
+                    className={`px-3 py-2 text-xs font-semibold rounded-xl transition-colors ${
+                      guruId === id
+                        ? 'bg-[#0f172a] text-white'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    {id === 'ramit' ? 'Ramit' : id === 'kiyosaki' ? 'Kiyosaki' : 'Buffett'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <MentorChat guruId={guruId} onGuruChange={setGuruId} />
           </section>
         )}
 

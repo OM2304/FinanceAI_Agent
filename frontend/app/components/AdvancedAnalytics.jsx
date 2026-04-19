@@ -2,6 +2,18 @@
 
 import { useMemo } from 'react';
 import { formatINR } from '../../lib/formatters';
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  ZAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  Sankey,
+} from 'recharts';
 import { SpendingPatterns } from './SpendingPatterns';
 import { PredictiveAnalytics } from './PredictiveAnalytics';
 
@@ -57,64 +69,102 @@ function toFiniteAmount(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function computeCategoryGrowth(expenses, periodDays = 30) {
-  const parsed = expenses
-    .map((tx) => ({ tx, dt: parseTransactionDateTime(tx) }))
-    .filter((row) => row.dt);
+function normalizeTransferBucket(label) {
+  const raw = String(label ?? '').trim();
+  if (!raw) return 'Savings';
 
-  if (parsed.length < 2) {
-    return { status: 'empty' };
+  const low = raw.toLowerCase();
+  if (low.includes('saving') || low.includes('deposit') || low.includes('sip') || low.includes('investment')) {
+    return 'Savings';
   }
+  if (low.includes('loan') || low.includes('emi')) return 'Debt';
+  if (low.includes('rent') || low.includes('landlord')) return 'Housing';
+  return raw.length > 22 ? `${raw.slice(0, 22)}...` : raw;
+}
 
-  const end = parsed.reduce((acc, row) => (row.dt > acc ? row.dt : acc), parsed[0].dt);
-  const currentStart = new Date(end);
-  currentStart.setDate(currentStart.getDate() - (periodDays - 1));
-  currentStart.setHours(0, 0, 0, 0);
-
-  const prevEnd = new Date(currentStart);
-  prevEnd.setMilliseconds(prevEnd.getMilliseconds() - 1);
-  const prevStart = new Date(prevEnd);
-  prevStart.setDate(prevStart.getDate() - (periodDays - 1));
-  prevStart.setHours(0, 0, 0, 0);
-
-  const currentTotals = {};
-  const previousTotals = {};
-
-  for (const { tx, dt } of parsed) {
-    const category = String(tx?.category ?? 'Uncategorized').trim() || 'Uncategorized';
-    const amount = toFiniteAmount(tx?.amount);
-    if (dt >= currentStart && dt <= end) {
-      currentTotals[category] = (currentTotals[category] ?? 0) + amount;
-    } else if (dt >= prevStart && dt <= prevEnd) {
-      previousTotals[category] = (previousTotals[category] ?? 0) + amount;
-    }
-  }
-
-  const categories = new Set([...Object.keys(currentTotals), ...Object.keys(previousTotals)]);
-  const deltas = [...categories].map((category) => {
-    const current = currentTotals[category] ?? 0;
-    const previous = previousTotals[category] ?? 0;
-    return { category, current, previous, diff: current - previous };
+function buildTransferFlow(expenses) {
+  const transferRows = (expenses ?? []).filter((tx) => {
+    const category = String(tx?.category ?? '').toLowerCase();
+    return category.includes('transfer');
   });
 
-  deltas.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
-  const biggestIncrease = deltas.filter((d) => d.diff > 0).sort((a, b) => b.diff - a.diff)[0] ?? null;
-  const biggestDecrease = deltas.filter((d) => d.diff < 0).sort((a, b) => a.diff - b.diff)[0] ?? null;
+  if (!transferRows.length) return { status: 'empty' };
+
+  const bucketTotals = {};
+  let total = 0;
+  for (const tx of transferRows) {
+    const amount = toFiniteAmount(tx?.amount);
+    total += amount;
+    const label = normalizeTransferBucket(tx?.receiver ?? tx?.description ?? 'Savings');
+    bucketTotals[label] = (bucketTotals[label] ?? 0) + amount;
+  }
+
+  const sorted = Object.entries(bucketTotals).sort((a, b) => b[1] - a[1]);
+  const split = sorted.slice(0, 4).map(([label, amount]) => ({ label, amount }));
+  const remainder = sorted.slice(4).reduce((sum, [, amount]) => sum + amount, 0);
+
+  if (remainder > 0) {
+    const savings = split.find((item) => item.label === 'Savings');
+    if (savings) savings.amount += remainder;
+    else split.push({ label: 'Savings', amount: remainder });
+  }
+
+  const nodes = [{ name: 'Transfers' }, ...split.map((item) => ({ name: item.label }))];
+  const links = split.map((item, idx) => ({ source: 0, target: idx + 1, value: Number(item.amount.toFixed(2)) }));
 
   return {
     status: 'ok',
-    period: {
-      currentStart: currentStart.toISOString().slice(0, 10),
-      currentEnd: end.toISOString().slice(0, 10),
-      previousStart: prevStart.toISOString().slice(0, 10),
-      previousEnd: prevEnd.toISOString().slice(0, 10),
-    },
-    biggestIncrease,
-    biggestDecrease,
+    total,
+    split,
+    data: { nodes, links },
   };
 }
 
-export default function AdvancedAnalytics({ expenses, totalAmount }) {
+function computeMonthlyCalendar(expenses) {
+  const parsed = (expenses ?? [])
+    .map((tx) => ({ dt: parseTransactionDateTime(tx), amount: toFiniteAmount(tx?.amount) }))
+    .filter((row) => row.dt);
+
+  if (!parsed.length) return { status: 'empty' };
+
+  const end = parsed.reduce((acc, row) => (row.dt > acc ? row.dt : acc), parsed[0].dt);
+  const month = end.getMonth();
+  const year = end.getFullYear();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const dailyTotals = Array.from({ length: 31 }, () => 0);
+
+  for (const row of parsed) {
+    if (row.dt.getMonth() === month && row.dt.getFullYear() === year) {
+      const index = row.dt.getDate() - 1;
+      if (index >= 0 && index < 31) dailyTotals[index] += row.amount;
+    }
+  }
+
+  const maxDaily = Math.max(1, ...dailyTotals);
+  const total = dailyTotals.slice(0, daysInMonth).reduce((sum, value) => sum + value, 0);
+  const peakValue = Math.max(...dailyTotals.slice(0, daysInMonth));
+  const peakDay = peakValue > 0 ? dailyTotals.findIndex((value) => value === peakValue) + 1 : null;
+
+  return {
+    status: 'ok',
+    label: end.toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+    daysInMonth,
+    dailyTotals,
+    maxDaily,
+    total,
+    peakDay,
+    peakValue,
+  };
+}
+
+function calendarCellStyle(value, maxDaily, isActiveDate) {
+  if (!isActiveDate) return { backgroundColor: '#f8fafc', opacity: 0.45 };
+  if (value <= 0) return { backgroundColor: '#e2e8f0' };
+  const opacity = 0.22 + (0.74 * (value / maxDaily));
+  return { backgroundColor: `rgba(15, 23, 42, ${opacity.toFixed(3)})` };
+}
+
+export default function AdvancedAnalytics({ expenses }) {
   const receiverTotals = useMemo(() => {
     const totals = {};
     for (const tx of expenses ?? []) {
@@ -127,19 +177,105 @@ export default function AdvancedAnalytics({ expenses, totalAmount }) {
       .slice(0, 5);
   }, [expenses]);
 
-  const anomalies = useMemo(() => {
-    const total = toFiniteAmount(totalAmount);
-    if (total <= 0) return [];
-    return (expenses ?? [])
-      .filter((tx) => toFiniteAmount(tx?.amount) > total * 0.1)
-      .slice()
-      .sort((a, b) => toFiniteAmount(b?.amount) - toFiniteAmount(a?.amount));
-  }, [expenses, totalAmount]);
+  const riskHeatmapData = useMemo(() => {
+    const grouped = {};
+    for (const tx of expenses ?? []) {
+      const receiver = String(tx?.receiver ?? tx?.description ?? 'Unknown').trim() || 'Unknown';
+      if (!grouped[receiver]) {
+        grouped[receiver] = {
+          receiver,
+          category: String(tx?.category ?? 'Uncategorized').trim() || 'Uncategorized',
+          count: 0,
+          totalAmount: 0,
+          confidenceSum: 0,
+        };
+      }
+      const entry = grouped[receiver];
+      entry.count += 1;
+      entry.totalAmount += toFiniteAmount(tx?.amount);
+      entry.confidenceSum += toFiniteAmount(tx?.ai_confidence ?? 0.5);
+    }
+    return Object.values(grouped)
+      .map((row) => ({
+        receiver: row.receiver,
+        category: row.category,
+        frequency: row.count,
+        total_amount: row.totalAmount,
+        ai_confidence: row.count > 0 ? row.confidenceSum / row.count : 0.5,
+        z: Math.max(10, Math.min(400, (row.count * 20) + (row.totalAmount / 200))),
+      }))
+      .sort((a, b) => b.total_amount - a.total_amount)
+      .slice(0, 40);
+  }, [expenses]);
 
-  const categoryGrowth = useMemo(() => computeCategoryGrowth(expenses ?? [], 30), [expenses]);
+  const heatmapDomain = useMemo(() => {
+    const maxX = Math.max(1, ...riskHeatmapData.map((d) => d.frequency));
+    const maxY = Math.max(1, ...riskHeatmapData.map((d) => d.total_amount));
+    return { maxX, maxY };
+  }, [riskHeatmapData]);
+
+  const anomalyLevel = (row) =>
+    row.category?.toLowerCase() === 'uncategorized' || row.total_amount > 5000 ? 'High' : 'Low';
+
+  const transferFlow = useMemo(() => buildTransferFlow(expenses ?? []), [expenses]);
+  const monthlyCalendar = useMemo(() => computeMonthlyCalendar(expenses ?? []), [expenses]);
+  const totalSpend = useMemo(
+    () => (expenses ?? []).reduce((sum, tx) => sum + toFiniteAmount(tx?.amount), 0),
+    [expenses]
+  );
+  const highRiskCount = useMemo(
+    () => riskHeatmapData.filter((row) => anomalyLevel(row) === 'High').length,
+    [riskHeatmapData]
+  );
+
+  const bubbleColor = (row) =>
+    row.category?.toLowerCase() === 'uncategorized' || row.total_amount > 5000 ? '#ef4444' : '#22c55e';
+
+  const renderTooltip = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
+    const data = payload[0].payload;
+    const level = anomalyLevel(data);
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lg text-sm text-slate-700">
+        <p className="font-semibold text-slate-900">{data.receiver}</p>
+        <p className="text-xs text-slate-500">Category: {data.category}</p>
+        <p className="mt-2 text-xs text-slate-700">
+          Mentor Insight: {data.receiver} is a Category {level} anomaly impacting your Health Score.
+        </p>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
+      <section className="rounded-3xl border border-slate-200 bg-slate-100/80 p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Quick Executive Brief</p>
+            <h2 className="text-lg font-semibold text-[#0f172a]">Snapshot For Fast Decisions</h2>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+            {expenses?.length ?? 0} txns
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Total Spend</p>
+            <p className="mt-1 text-base font-semibold text-[#0f172a]">{formatINR(totalSpend)}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Transfers</p>
+            <p className="mt-1 text-base font-semibold text-[#0f172a]">
+              {transferFlow.status === 'ok' ? formatINR(transferFlow.total) : '₹0.00'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Mentor Alerts</p>
+            <p className="mt-1 text-base font-semibold text-[#0f172a]">{highRiskCount}</p>
+          </div>
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -162,72 +298,131 @@ export default function AdvancedAnalytics({ expenses, totalAmount }) {
 
         <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Anomaly List</h2>
-            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">&gt; 10%</span>
+            <h2 className="text-lg font-semibold text-slate-900">Risk Heatmap</h2>
+            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Repeat Visits x Amount</span>
           </div>
-          {anomalies.length ? (
-            <div className="space-y-3">
-              {anomalies.slice(0, 8).map((tx) => (
-                <div key={tx.id ?? `${tx.date}-${tx.time}-${tx.receiver}-${tx.amount}`} className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{tx.receiver}</p>
-                    <p className="text-xs text-slate-500">
-                      {tx.date} {tx.time ? `· ${tx.time}` : ''} {tx.category ? `· ${tx.category}` : ''}
+          {riskHeatmapData.length ? (
+            <div>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
+                    <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" />
+                    <XAxis
+                      type="number"
+                      dataKey="frequency"
+                      name="Repeat Visits"
+                      domain={[0, heatmapDomain.maxX + 1]}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="total_amount"
+                      name="Total Amount"
+                      domain={[0, heatmapDomain.maxY * 1.1]}
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(value) => formatINR(value)}
+                    />
+                    <ZAxis type="number" dataKey="z" range={[10, 400]} />
+                    <Tooltip content={renderTooltip} />
+                    <Scatter data={riskHeatmapData}>
+                      {riskHeatmapData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={bubbleColor(entry)} fillOpacity={0.75} />
+                      ))}
+                    </Scatter>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+                <div className="mb-3 flex items-center justify-between gap-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Daily Spend Calendar</h3>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {monthlyCalendar.status === 'ok' ? monthlyCalendar.label : 'This month'}
+                  </span>
+                </div>
+                {monthlyCalendar.status !== 'ok' ? (
+                  <p className="text-sm text-slate-500">No daily trend data yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-7 gap-2">
+                      {monthlyCalendar.dailyTotals.map((value, idx) => {
+                        const day = idx + 1;
+                        const isActiveDate = day <= monthlyCalendar.daysInMonth;
+                        return (
+                          <div
+                            key={`calendar-day-${day}`}
+                            title={
+                              isActiveDate
+                                ? `Day ${day}: ${formatINR(value)}`
+                                : `Day ${day}: not in month`
+                            }
+                            style={calendarCellStyle(value, monthlyCalendar.maxDaily, isActiveDate)}
+                            className="h-7 rounded-md border border-white/60 text-[10px] text-slate-700 flex items-center justify-center"
+                          >
+                            {day}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Total: {formatINR(monthlyCalendar.total)} | Peak day:{' '}
+                      {monthlyCalendar.peakDay ? `${monthlyCalendar.peakDay} (${formatINR(monthlyCalendar.peakValue)})` : 'None'}
                     </p>
                   </div>
-                  <span className="text-sm font-semibold text-rose-700">{formatINR(tx.amount)}</span>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">No large transactions detected.</p>
+            <p className="text-sm text-slate-500">No anomaly signals yet.</p>
           )}
         </section>
 
         <section className="bg-white/85 backdrop-blur border border-white/70 rounded-3xl shadow-xl shadow-slate-200/60 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Category Growth</h2>
-            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">30D vs Prev</span>
+            <h2 className="text-lg font-semibold text-slate-900">Transfer Flow</h2>
+            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Sankey View</span>
           </div>
-          {categoryGrowth.status !== 'ok' ? (
-            <p className="text-sm text-slate-500">Not enough data to compare periods.</p>
+          {transferFlow.status !== 'ok' ? (
+            <p className="text-sm text-slate-500">No transfer data available yet.</p>
           ) : (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Biggest Increase</p>
-                {categoryGrowth.biggestIncrease ? (
-                  <div className="mt-2 flex items-center justify-between gap-4">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{categoryGrowth.biggestIncrease.category}</span>
-                    <span className="text-sm font-semibold text-emerald-700">
-                      +{formatINR(categoryGrowth.biggestIncrease.diff)}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-500">No increases detected.</p>
-                )}
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Transfers Pool</p>
+                <p className="mt-2 text-xl font-semibold text-slate-900">{formatINR(transferFlow.total)}</p>
+                <p className="text-[11px] text-slate-500 mt-1">Movement split into known destinations and Savings.</p>
               </div>
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Biggest Decrease</p>
-                {categoryGrowth.biggestDecrease ? (
-                  <div className="mt-2 flex items-center justify-between gap-4">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{categoryGrowth.biggestDecrease.category}</span>
-                    <span className="text-sm font-semibold text-rose-700">
-                      {formatINR(categoryGrowth.biggestDecrease.diff)}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-500">No decreases detected.</p>
-                )}
+
+              <div className="h-[450px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <Sankey
+                    data={transferFlow.data}
+                    nodePadding={30}
+                    nodeWidth={14}
+                    margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                    link={{ stroke: '#64748b' }}
+                  >
+                    <Tooltip
+                      formatter={(value) => formatINR(value)}
+                      contentStyle={{ borderRadius: '12px', borderColor: '#e2e8f0' }}
+                    />
+                  </Sankey>
+                </ResponsiveContainer>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Current: {categoryGrowth.period.currentStart} → {categoryGrowth.period.currentEnd} · Previous: {categoryGrowth.period.previousStart} → {categoryGrowth.period.previousEnd}
-              </p>
+
+              <div className="space-y-2">
+                {transferFlow.split.map((item) => (
+                  <div key={`flow-split-${item.label}`} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600 truncate">{item.label}</span>
+                    <span className="font-semibold text-slate-900">{formatINR(item.amount)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </section>
       </div>
 
-      <PredictiveAnalytics />
+      <PredictiveAnalytics showCoreCards={false} />
       <SpendingPatterns />
     </div>
   );

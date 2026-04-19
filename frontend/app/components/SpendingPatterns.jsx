@@ -1,12 +1,73 @@
 'use client'
 
 import { useEffect, useState } from 'react';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { fetchSpendingPatterns } from '../../lib/api';
 
 const formatCurrency = (value) => {
   const num = Number(value || 0);
   return `INR ${num.toFixed(2)}`;
 };
+
+function DonutSparkline({
+  title,
+  primaryLabel,
+  primaryValue,
+  secondaryLabel,
+  secondaryValue,
+  footnote,
+  colors = ['#0ea5e9', '#cbd5e1'],
+}) {
+  const a = Number(primaryValue || 0);
+  const b = Number(secondaryValue || 0);
+  const total = Math.max(a + b, 1);
+  const data = [
+    { name: primaryLabel, value: a },
+    { name: secondaryLabel, value: b },
+  ];
+  const primaryShare = Math.round((a / total) * 100);
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{title}</p>
+      <div className="mt-3 flex items-center gap-4">
+        <div className="h-20 w-20 shrink-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={22}
+                outerRadius={34}
+                stroke="none"
+                startAngle={90}
+                endAngle={-270}
+              >
+                {data.map((entry, idx) => (
+                  <Cell key={`${entry.name}-${idx}`} fill={colors[idx % colors.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="min-w-0 space-y-1 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-600 truncate">{primaryLabel}</span>
+            <span className="font-semibold text-slate-900">{formatCurrency(a)}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-600 truncate">{secondaryLabel}</span>
+            <span className="font-semibold text-slate-900">{formatCurrency(b)}</span>
+          </div>
+          <p className="text-[11px] text-slate-500">{primaryLabel}: {primaryShare}%</p>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">{footnote}</p>
+    </div>
+  );
+}
 
 export function SpendingPatterns() {
   const [data, setData] = useState(null);
@@ -57,63 +118,60 @@ export function SpendingPatterns() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Avg Daily Spend</p>
-          <p className="mt-2 text-xl font-semibold text-slate-900">{formatCurrency(data.avg_daily_spend)}</p>
-          <p className="text-xs text-slate-500 mt-1">{data.period?.days} days</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Category</p>
-          <p className="mt-2 text-base font-semibold text-slate-900">{data.top_category?.name || '—'}</p>
-          <p className="text-xs text-slate-500 mt-1">
-            {formatCurrency(data.top_category?.amount)} · {data.top_category?.percent || 0}%
-          </p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Merchant</p>
-          <p className="mt-2 text-base font-semibold text-slate-900">{data.top_merchant?.name || '—'}</p>
-          <p className="text-xs text-slate-500 mt-1">{formatCurrency(data.top_merchant?.amount)}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Busiest Day</p>
-          <p className="mt-2 text-base font-semibold text-slate-900">{data.busiest_day?.day || '—'}</p>
-          <p className="text-xs text-slate-500 mt-1">{formatCurrency(data.busiest_day?.amount)}</p>
-        </div>
-      </div>
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Avg Daily Spend</p>
+    <p className="mt-2 text-xl font-semibold text-slate-900">{formatCurrency(data.avg_daily_spend)}</p>
+    <p className="text-xs text-slate-500 mt-1">{data.period?.days} days</p>
+  </div>
+  
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Category</p>
+    <p className="mt-2 text-base font-semibold text-slate-900">{data.top_category?.name || 'N/A'}</p>
+    <p className="text-xs text-slate-500 mt-1">
+      {formatCurrency(data.top_category?.amount)} • {data.top_category?.percent || 0}%
+    </p>
+  </div>
+  
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Merchant</p>
+    <p className="mt-2 text-base font-semibold text-slate-900">{data.top_merchant?.name || 'Unknown'}</p>
+    <p className="text-xs text-slate-500 mt-1">{formatCurrency(data.top_merchant?.amount)}</p>
+  </div>
+  
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Busiest Day</p>
+    <p className="mt-2 text-base font-semibold text-slate-900">{data.busiest_day?.day || 'None'}</p>
+    <p className="text-xs text-slate-500 mt-1">{formatCurrency(data.busiest_day?.amount)}</p>
+  </div>
+</div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Weekend vs Weekday</p>
-          <div className="mt-3 flex items-center justify-between text-sm">
-            <span className="text-slate-600">Weekend</span>
-            <span className="font-semibold text-slate-900">{formatCurrency(data.weekend_total)}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-slate-600">Weekday</span>
-            <span className="font-semibold text-slate-900">{formatCurrency(data.weekday_total)}</span>
-          </div>
-          <p className="text-xs text-slate-500 mt-2">{data.weekend_share}% of spend happens on weekends.</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Month-over-Month</p>
-          {data.month_over_month ? (
-            <>
-              <div className="mt-3 flex items-center justify-between text-sm">
-                <span className="text-slate-600">Current</span>
-                <span className="font-semibold text-slate-900">{formatCurrency(data.month_over_month.current)}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-sm">
-                <span className="text-slate-600">Previous</span>
-                <span className="font-semibold text-slate-900">{formatCurrency(data.month_over_month.previous)}</span>
-              </div>
-              <p className="text-xs text-slate-500 mt-2">
-                {data.month_over_month.percent}% change from last month.
-              </p>
-            </>
-          ) : (
+        <DonutSparkline
+          title="Weekend vs Weekday"
+          primaryLabel="Weekend"
+          primaryValue={data.weekend_total}
+          secondaryLabel="Weekday"
+          secondaryValue={data.weekday_total}
+          footnote={`${data.weekend_share}% of spend happens on weekends.`}
+          colors={['#0ea5e9', '#dbeafe']}
+        />
+
+        {data.month_over_month ? (
+          <DonutSparkline
+            title="Month-over-Month"
+            primaryLabel="Current"
+            primaryValue={data.month_over_month.current}
+            secondaryLabel="Previous"
+            secondaryValue={data.month_over_month.previous}
+            footnote={`${data.month_over_month.percent}% change from last month.`}
+            colors={['#16a34a', '#bbf7d0']}
+          />
+        ) : (
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Month-over-Month</p>
             <p className="text-sm text-slate-500 mt-2">Not enough data to calculate monthly change.</p>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
@@ -125,7 +183,7 @@ export function SpendingPatterns() {
               .map((m) => (
               <div key={m.name} className="flex items-center justify-between">
                 <span className="text-slate-700">{m.name}</span>
-                <span className="text-slate-900 font-semibold">{m.count} · {formatCurrency(m.total)}</span>
+                <span className="text-slate-900 font-semibold">{m.count} � {formatCurrency(m.total)}</span>
               </div>
             ))}
           </div>
