@@ -10,8 +10,33 @@ export function TransactionConfirmationModal({
   isSaving = false,
   errorMessage = ''
 }) {
+  const DATE_REGEX = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[012])\/(19|20)\d\d$/;
+  const TIME_REGEX = /^(0[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+
+  const normalizeExtractedData = (data) => {
+    const src = data && typeof data === 'object' ? data : {};
+    const lowered = {};
+    for (const [key, value] of Object.entries(src)) {
+      if (typeof key === 'string') lowered[key.toLowerCase()] = value;
+    }
+
+    return {
+      ...src,
+      amount: lowered.amount ?? src.amount,
+      date: lowered.date ?? src.date,
+      time: lowered.time ?? src.time,
+      receiver: lowered.receiver ?? src.receiver,
+      sender: lowered.sender ?? src.sender,
+      category: lowered.category ?? src.category,
+      transaction_id:
+        lowered.transaction_id ?? src.transaction_id ?? lowered.transactionid ?? src.transactionId ?? src.transactionID,
+    };
+  };
+
+  const normalizedExtractedData = normalizeExtractedData(extractedData);
+
   const firstMissingField = (() => {
-    const data = extractedData || {};
+    const data = normalizedExtractedData || {};
     const candidates = ["amount", "date", "time", "sender", "receiver"];
     for (const field of candidates) {
       const value = data[field];
@@ -23,7 +48,7 @@ export function TransactionConfirmationModal({
   })();
 
   const [editedData, setEditedData] = useState(() =>
-    extractedData ? { ...extractedData, corrected: false } : null
+    extractedData ? { ...normalizedExtractedData, corrected: false } : null
   );
   const [editingField, setEditingField] = useState(() => firstMissingField);
   const [validationErrors, setValidationErrors] = useState({});
@@ -44,7 +69,8 @@ export function TransactionConfirmationModal({
   };
 
   const isValidDateDmy = (value) => {
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(value || '')) return false;
+    const raw = String(value || '').trim();
+    if (!DATE_REGEX.test(raw)) return false;
     const [dd, mm, yyyy] = value.split('/').map((part) => Number(part));
     if (!dd || !mm || !yyyy) return false;
     if (mm < 1 || mm > 12) return false;
@@ -55,15 +81,37 @@ export function TransactionConfirmationModal({
 
   const isValidTime = (value) => {
     const raw = String(value || '').trim();
-    if (!raw) return false;
+    return TIME_REGEX.test(raw);
+  };
 
-    // 24-hour: HH:MM (00-23:00-59)
-    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)) return true;
+  const normalizeTimeInput = (rawValue) => {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return '';
 
-    // 12-hour: HH:MM AM/PM (01-12:00-59 AM/PM)
-    if (/^(?:0?[1-9]|1[0-2]):[0-5]\d\s?(?:AM|PM)$/i.test(raw)) return true;
+    const compact = raw.toUpperCase().replace(/\s+/g, '').replace('.', ':');
 
-    return false;
+    // 24-hour -> strict 12-hour.
+    let m = compact.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+    if (m) {
+      const hour24 = Number(m[1]);
+      const minute = Number(m[2]);
+      const ampm = hour24 < 12 ? 'AM' : 'PM';
+      const hour12 = ((hour24 + 11) % 12) + 1;
+      return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${ampm}`;
+    }
+
+    // 12-hour variants -> strict 12-hour.
+    m = compact.match(/^(0?[1-9]|1[0-2]):([0-5]\d)(AM|PM)$/);
+    if (m) {
+      const hour = Number(m[1]);
+      const minute = Number(m[2]);
+      const ampm = m[3];
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${ampm}`;
+    }
+
+    // Best-effort: insert a space before AM/PM if missing.
+    const spaced = raw.toUpperCase().replace(/\s+/g, ' ').replace('.', ':').replace(/(\d)(AM|PM)\b/, '$1 $2');
+    return spaced;
   };
 
   const validateFields = (field, value) => {
@@ -81,19 +129,20 @@ export function TransactionConfirmationModal({
 
     if (field === 'date') {
       if (!isValidDateDmy(String(value || ''))) {
-        errors[field] = 'Please enter a valid date.';
+        errors[field] = 'Use DD/MM/YYYY';
       }
     }
 
     if (field === 'time') {
-      if (!isValidTime(value)) {
-        errors[field] = 'Invalid time format.';
+      const raw = String(value || '').trim();
+      if (!isValidTime(raw)) {
+        errors[field] = 'Use HH:MM AM/PM';
       }
     }
 
     if (field === 'sender' || field === 'receiver') {
       const text = String(value || '').trim();
-      if (text.length < 3) {
+      if (text && text.length < 3) {
         errors[field] = 'Must be at least 3 characters.';
       }
     }
@@ -110,7 +159,7 @@ export function TransactionConfirmationModal({
 
   const handleInputChange = (field, value, { validate = true } = {}) => {
     const nextValue =
-      field === 'date' ? sanitizeDateInput(value) : field === 'time' ? String(value || '').toUpperCase() : value;
+      field === 'date' ? sanitizeDateInput(value) : field === 'time' ? normalizeTimeInput(value) : value;
 
     const isManualCorrection = field === 'category' && nextValue !== extractedData?.category;
 
@@ -131,12 +180,11 @@ export function TransactionConfirmationModal({
     const allErrors = {};
     const allWarnings = {};
 
-    Object.keys(editedData).forEach((field) => {
-      if (field !== 'confidence' && field !== 'corrected') {
-        const { errors, warns } = validateFields(field, editedData[field]);
-        if (errors[field]) allErrors[field] = errors[field];
-        if (warns[field]) allWarnings[field] = warns[field];
-      }
+    const required = ["amount", "date", "time", "category"];
+    required.forEach((field) => {
+      const { errors, warns } = validateFields(field, editedData?.[field]);
+      if (errors[field]) allErrors[field] = errors[field];
+      if (warns[field]) allWarnings[field] = warns[field];
     });
 
     setValidationErrors(allErrors);
@@ -189,7 +237,7 @@ export function TransactionConfirmationModal({
             type={field === 'amount' ? 'number' : 'text'}
             value={editedData[field] || ''}
             inputMode={field === 'date' ? 'numeric' : undefined}
-            placeholder={field === 'date' ? 'DD/MM/YYYY' : field === 'time' ? 'HH:MM AM/PM or 24-hour' : undefined}
+            placeholder={field === 'date' ? 'DD/MM/YYYY' : field === 'time' ? 'HH:MM AM/PM' : undefined}
             onChange={(e) => handleInputChange(field, e.target.value, { validate: true })}
             onBlur={() => {
               handleInputChange(field, editedData[field] || '', { validate: true });
@@ -227,13 +275,13 @@ export function TransactionConfirmationModal({
 
   if (!isReady) return null;
 
-  const hasAnyErrors = Object.values(validationErrors || {}).some(Boolean);
-  const requiredFields = ["amount", "date", "time", "sender", "receiver"];
-  const hasDerivedErrors = requiredFields.some((field) => {
-    const { errors } = validateFields(field, editedData?.[field]);
-    return Boolean(errors[field]);
-  });
-  const isConfirmDisabled = isSaving || hasAnyErrors || hasDerivedErrors;
+  const amountValue = Number(editedData?.amount);
+  const isAmountValid = Number.isFinite(amountValue) && amountValue > 0;
+  const isDateValid = isValidDateDmy(editedData?.date);
+  const isTimeValid = isValidTime(editedData?.time);
+
+  const isConfirmDisabled =
+    isSaving || !isAmountValid || !isDateValid || !isTimeValid || !String(editedData?.category || '').trim();
 
   const modalUi = (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-[10000]">

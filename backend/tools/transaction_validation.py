@@ -50,16 +50,16 @@ def parse_date(value: Any) -> date:
     raise ValueError("date must be a valid date")
 
 
-def normalize_time(value: Any) -> str:
+def normalize_time(value: Any) -> Optional[str]:
     if value is None:
-        raise ValueError("time is required")
+        return None
     if isinstance(value, str):
         raw = value.strip()
     else:
         raw = str(value).strip()
 
     if not raw:
-        raise ValueError("time is required")
+        return None
 
     # Accept HH:MM (24h) or H:MM, and also 12-hour with AM/PM.
     candidates = (
@@ -87,7 +87,7 @@ class TransactionConfirmModel(BaseModel):
     receiver: constr(strip_whitespace=True, min_length=2)  # type: ignore[valid-type]
     sender: constr(strip_whitespace=True, min_length=2) = "Self"  # type: ignore[valid-type]
     date: date
-    time: str = "00:00"
+    time: Optional[str] = None
     category: TransactionCategory = TransactionCategory.OTHER
     transaction_id: Optional[constr(strip_whitespace=True, min_length=4)] = None  # type: ignore[valid-type]
     ai_confidence: float = 0.5
@@ -101,7 +101,7 @@ class TransactionConfirmModel(BaseModel):
         return parsed
 
     @validator("time", pre=True)
-    def _normalize_time(cls, value: Any) -> str:
+    def _normalize_time(cls, value: Any) -> Optional[str]:
         return normalize_time(value)
 
     @validator("ai_confidence", pre=True)
@@ -125,4 +125,3 @@ class TransactionConfirmModel(BaseModel):
             data["category"].value if isinstance(data.get("category"), TransactionCategory) else data.get("category")
         )
         return data
-

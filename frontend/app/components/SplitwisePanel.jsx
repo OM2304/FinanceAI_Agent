@@ -125,7 +125,9 @@ export function SplitwisePanel() {
   }, [selectedGroup]);
 
   const formatCurrency = (value) => {
-    const num = Number(value || 0);
+    const raw = value ?? 0;
+    const cleaned = typeof raw === 'string' ? raw.replace(/[^\d.-]/g, '') : raw;
+    const num = Number.parseFloat(String(cleaned));
     return `INR ${num.toFixed(2)}`;
   };
 

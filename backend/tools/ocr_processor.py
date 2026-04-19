@@ -2,10 +2,18 @@ import cv2
 import requests
 import re
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 from tools.llm_config import get_llm
 from tools.ml_categorizer import AdaptiveCategorizer
+from tools.ocr import (
+    build_amount_extraction_prompt,
+    clean_amount_to_float,
+    extract_transaction_amount,
+    llm_extract_financial_fields,
+    sanitize_ocr_date,
+)
 
 load_dotenv()
 OCR_SPACE_API_KEY = os.getenv("OCR_SPACE_API_KEY")
@@ -53,9 +61,82 @@ def ocr_space(image_path):
 
 
 # ---------------- STRONG AMOUNT EXTRACTION ----------------
+def _extract_primary_amount_strict(text: str) -> Optional[float]:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    # Primary path: shared extraction logic in tools.ocr.
+    try:
+        extracted = extract_transaction_amount(raw)
+        if extracted is not None:
+            return float(extracted)
+    except Exception as exc:
+        print(f"Primary amount extraction error: {exc}")
+
+    def valid_amount(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        if value != value:  # NaN
+            return None
+        if value < 1 or value > 2000000:
+            return None
+        # Filter likely years unless decimals are present.
+        if float(int(value)) == value and 1900 <= int(value) <= 2099:
+            return None
+        return value
+
+    currency_hits: list[float] = []
+    labelled_hits: list[float] = []
+    any_hits: list[float] = []
+
+    # Currency anchored: ₹, INR, Rs.
+    for match in re.finditer(r"(?:₹|\u20b9|rs\.?|inr)\s*([0-9][0-9,\s]*\.?[0-9]{0,3})", raw, re.I):
+        val = valid_amount(clean_amount_to_float(match.group(1)))
+        if val is not None:
+            currency_hits.append(val)
+
+    # Keyword labelled: Paid/Amount/Total near a number.
+    for match in re.finditer(
+        r"(?:paid|debited|credited|sent|received|amount|total|payable)\D{0,20}([0-9][0-9,\s]*\.?[0-9]{0,3})",
+        raw,
+        re.I,
+    ):
+        val = valid_amount(clean_amount_to_float(match.group(1)))
+        if val is not None:
+            labelled_hits.append(val)
+
+    # Any plausible number (fallback).
+    for match in re.finditer(r"\b([0-9][0-9,\s]{0,10}(?:\.[0-9]{1,3})?)\b", raw):
+        val = valid_amount(clean_amount_to_float(match.group(1)))
+        if val is not None:
+            any_hits.append(val)
+
+    if currency_hits:
+        return max(currency_hits)
+    if labelled_hits:
+        return max(labelled_hits)
+    if any_hits:
+        return max(any_hits)
+
+    # LLM fallback: only used when heuristics fail completely.
+    try:
+        prompt = build_amount_extraction_prompt(raw)
+        response = llm.invoke(prompt)
+        candidate = getattr(response, "content", response)
+        return valid_amount(clean_amount_to_float(candidate))
+    except Exception as exc:
+        print(f"Amount LLM fallback error: {exc}")
+        return None
+
+
 def extract_amount(text):
     print(f"DEBUG: Raw OCR Text for Amount Extraction:\n{text}") # Debug log
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    strict_val = _extract_primary_amount_strict(text)
+    if strict_val is not None:
+        return strict_val
 
     # Priority 1: Currency-anchored amounts (e.g. INR 50,000, Rs 500)
     currency_candidates = []
@@ -63,9 +144,8 @@ def extract_amount(text):
     for line in lines:
         clean = line.replace("✔", "").replace("●", "").replace("O", "0")
         
-        # Matches: INR 50,000 | Rs. 450.50 | INR 1200 | \u20b9 50000 | \u20ac 50000
-        # Added support for 'Amount' or 'Total' with currency
-        m = re.search(r'(?:\u20b9|\u20ac|rs\.?|inr)\s*([\d,]+\.?\d*)', clean, re.I)
+        # Matches: INR 50,000 | Rs. 450.50 | INR 1200 | ₹ 50000
+        m = re.search(r'(?:₹|\u20b9|rs\.?|inr)\s*([\d,]+\.?\d*)', clean, re.I)
         if m:
             raw_val = m.group(1).replace(',', '')
             try:
@@ -73,6 +153,17 @@ def extract_amount(text):
                 if 1 <= val <= 2000000: 
                     currency_candidates.append(val)
             except:
+                pass
+
+        # Matches: Paid to ... ₹500 or Paid to ... INR 500
+        m = re.search(r'paid\s+to.*?(?:₹|\u20b9|rs\.?|inr)\s*([\d,]+\.?\d*)', clean, re.I)
+        if m:
+            raw_val = m.group(1).replace(',', '')
+            try:
+                val = float(raw_val)
+                if 1 <= val <= 2000000:
+                    currency_candidates.append(val)
+            except Exception:
                 pass
 
     if currency_candidates:
@@ -141,14 +232,19 @@ def extract_amount(text):
 
 # ---------------- DATE & TIME ----------------
 def extract_date_time(text):
-    patterns = [
-        r'(\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}).*?(\d{1,2}:\d{2}\s*[APap][Mm])'
-    ]
-    for p in patterns:
-        m = re.search(p, text)
-        if m:
-            return m.group(1), m.group(2)
-    return "Not found", "Not found"
+    # Date: allow common OCR variants; normalize month via sanitize_ocr_date.
+    date_match = re.search(
+        r"(\d{1,2}\s*[-/ ]\s*[A-Za-z]{3,9}\s*[-/ ]\s*\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        text,
+        re.I,
+    )
+    date_str = sanitize_ocr_date(date_match.group(1)) if date_match else "Not found"
+
+    # Time: must come from image; if missing, return null (None).
+    time_match = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)", text, re.I)
+    time_str = time_match.group(1).strip().upper() if time_match else None
+
+    return date_str, time_str
 
 
 # ---------------- SENDER ----------------
@@ -304,21 +400,35 @@ def parse_transaction(image_path):
     if not raw_text:
         return None
 
-    date, time = extract_date_time(raw_text)
-    amount = extract_amount(raw_text)
+    extracted = llm_extract_financial_fields(raw_text)
+    amount = extracted.get("amount") if isinstance(extracted, dict) else None
+    date = extracted.get("date") if isinstance(extracted, dict) else None
+    time = extracted.get("time") if isinstance(extracted, dict) else None
+    receiver = extracted.get("receiver") if isinstance(extracted, dict) else None
+    category = extracted.get("category") if isinstance(extracted, dict) else None
+
+    # Fallbacks if the LLM output is incomplete/garbled.
+    if not receiver:
+        receiver = extract_receiver(raw_text)
+    if not date or date == "Not found":
+        date, _time = extract_date_time(raw_text)
+        if not time:
+            time = _time
+    if amount is None or amount == "Not found":
+        amount = extract_amount(raw_text)
+
     sender = extract_sender(raw_text)
-    receiver = extract_receiver(raw_text)
     transaction_id = extract_transaction_id(raw_text)
 
-    # Get Category from AI
-    category, _ = categorize_transaction_hybrid(receiver, amount, raw_text)
+    if not category or str(category).strip().lower() in {"", "not found", "unknown"}:
+        category, _ = categorize_transaction_hybrid(receiver, amount, raw_text)
 
     return {
         "amount": amount,
         "sender": sender,
         "receiver": receiver,
-        "date": date,
-        "time": time,
+        "date": date if date is not None else "Not found",
+        "time": time if time is not None else None,
         "transaction_id": transaction_id,
         "category": category,
         "raw_text": raw_text,

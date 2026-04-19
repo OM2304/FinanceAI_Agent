@@ -124,11 +124,21 @@ export async function fetchBudgetSummary(token) {
 }
 
 export async function fetchSpendingPatterns(token) {
-  const res = await fetch(`${API_URL}/user/spending-patterns`, {
+  const url = `${API_URL}/user/spending-patterns`;
+  const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (res.status === 401) throw new Error("Unauthorized");
-  if (!res.ok) throw new Error("Failed to fetch spending patterns");
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = await res.text();
+    } catch (_) {
+      // ignore
+    }
+    console.error('fetchSpendingPatterns failed', { url, status: res.status, detail });
+    throw new Error(res.status === 404 ? '404: spending-patterns endpoint not found' : 'Failed to fetch spending patterns');
+  }
   return res.json();
 }
 

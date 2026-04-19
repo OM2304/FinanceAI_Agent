@@ -55,9 +55,9 @@ def save_transaction(user_id: str, transaction_data: dict) -> dict:
             from datetime import datetime
             date_value = datetime.now().strftime('%Y-%m-%d')
     
-    time_value = transaction_data.get("time", "00:00")
-    if time_value == "Not found":
-        time_value = "00:00"
+    time_value = transaction_data.get("time")
+    if time_value in ("Not found", "", None):
+        time_value = None
     
     receiver_value = transaction_data.get("receiver")
     if not receiver_value or receiver_value == "Not found":
@@ -110,8 +110,16 @@ def save_transaction(user_id: str, transaction_data: dict) -> dict:
             "corrected": transaction_data.get("corrected", False)
         }
         
-        result = supabase.table("transactions").insert(db_data).execute()
-        return result.data[0] if result.data else None
+        try:
+            result = supabase.table("transactions").insert(db_data).execute()
+            return result.data[0] if result.data else None
+        except Exception:
+            # Backwards-compat: if `time` is NOT NULL in the DB, retry with a safe default.
+            if db_data.get("time") is None:
+                db_data["time"] = "00:00"
+                result = supabase.table("transactions").insert(db_data).execute()
+                return result.data[0] if result.data else None
+            raise
         
     except ValueError as e:
         print(f"Validation error in save_transaction: {e}")

@@ -516,17 +516,27 @@ def chat_with_advisor(user_input: str, user_id: str, guru_preference: Optional[s
             recent_tx_display += f"{i}. {tx['date']} - {tx['description']} - {tx['amount']} ({tx['category']})\n"
 
     patterns_display = ""
-    if spending_patterns and spending_patterns.get("status") == "ok":
-        top_cat = spending_patterns.get("top_category") or {}
-        top_merch = spending_patterns.get("top_merchant") or {}
-        busiest = spending_patterns.get("busiest_day") or {}
+    if spending_patterns and spending_patterns.get("has_data"):
+        wvw = spending_patterns.get("weekend_vs_weekday") or {}
+        weekend = wvw.get("weekend", 0)
+        weekday = wvw.get("weekday", 0)
+        total = float(weekend or 0) + float(weekday or 0)
+        weekend_share = round((float(weekend or 0) / total) * 100, 2) if total else 0.0
+
+        top_category = None
+        dist = spending_patterns.get("category_distribution") or []
+        if isinstance(dist, list) and dist:
+            try:
+                top_category = dist[0].get("name")
+            except Exception:
+                top_category = None
+
         patterns_display = (
             "\nSpending Patterns:\n"
-            f"- Avg daily spend: INR {spending_patterns.get('avg_daily_spend', 0)}\n"
-            f"- Top category: {top_cat.get('name', 'N/A')} ({top_cat.get('percent', 0)}%)\n"
-            f"- Top merchant: {top_merch.get('name', 'N/A')}\n"
-            f"- Busiest day: {busiest.get('day', 'N/A')}\n"
-            f"- Weekend share: {spending_patterns.get('weekend_share', 0)}%\n"
+            f"- Weekend spend: INR {weekend}\n"
+            f"- Weekday spend: INR {weekday}\n"
+            f"- Weekend share: {weekend_share}%\n"
+            f"- Top category: {top_category or 'N/A'}\n"
         )
 
     recs_display = ""

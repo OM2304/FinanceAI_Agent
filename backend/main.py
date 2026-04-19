@@ -32,6 +32,7 @@ from financial_engine import mf_api, calculators, advisor
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from tools.transaction_validation import TransactionConfirmModel
 from langchain.agents import create_agent
+from tools.ocr import clean_amount_to_float, sanitize_ocr_date
 
 
 app = FastAPI()
@@ -101,7 +102,7 @@ class TransactionModel(BaseModel):
     receiver: str
     sender: Optional[str] = "Self"
     date: Optional[str] = None
-    time: Optional[str] = "00:00"
+    time: Optional[str] = None
     transaction_id: Optional[str] = None
     category: Optional[str] = None
     ai_confidence: Optional[float] = 0.5
@@ -221,6 +222,113 @@ def _sanitize_assistant_text(value: object) -> str:
     text = re.sub(r"^\s*(signature|sig)\s*:\s*.*$", "", text, flags=re.I | re.M).strip()
 
     return text
+
+
+def _format_ocr_date(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "not found":
+        return ""
+
+    normalized = sanitize_ocr_date(raw)
+    if not normalized or normalized.lower() == "not found":
+        return ""
+
+    # 29/03/2026 or 29-03-2026
+    m = re.search(r"\b(?P<d>\d{1,2})[/-](?P<m>\d{1,2})[/-](?P<y>\d{4})\b", normalized)
+    if m:
+        try:
+            dt = datetime(int(m.group("y")), int(m.group("m")), int(m.group("d")))
+            return dt.strftime("%d/%m/%Y")
+        except Exception:
+            return ""
+
+    # 29 Dec 2026 (after sanitize_ocr_date) or Dec 29 2026
+    m = re.search(r"\b(?P<d>\d{1,2})\s+(?P<m>[A-Za-z]{3,9})\s+(?P<y>\d{4})\b", normalized)
+    if m:
+        candidate = f"{int(m.group('d')):02d} {m.group('m')} {m.group('y')}"
+        for fmt in ("%d %b %Y", "%d %B %Y"):
+            try:
+                return datetime.strptime(candidate, fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                continue
+        return ""
+
+    m = re.search(r"\b(?P<m>[A-Za-z]{3,9})\s+(?P<d>\d{1,2})(?:,)?\s+(?P<y>\d{4})\b", normalized)
+    if m:
+        candidate = f"{m.group('m')} {int(m.group('d')):02d} {m.group('y')}"
+        for fmt in ("%b %d %Y", "%B %d %Y"):
+            try:
+                return datetime.strptime(candidate, fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                continue
+        return ""
+
+    # If missing year (e.g. "Jan 15"), force user entry.
+    if re.search(r"\b[A-Za-z]{3,9}\s+\d{1,2}\b", normalized) and not re.search(r"\b\d{4}\b", normalized):
+        return ""
+
+    return ""
+
+
+def _format_ocr_time(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "not found":
+        return ""
+
+    compact = raw.replace(".", ":").replace(" ", "").upper()
+
+    m = re.search(r"\b(?P<h>0?[1-9]|1[0-2]):(?P<m>[0-5]\d)\s*(?P<ampm>AM|PM)\b", raw.strip(), re.I)
+    if m:
+        hh = int(m.group("h"))
+        mm = int(m.group("m"))
+        ampm = m.group("ampm").upper()
+        return f"{hh:02d}:{mm:02d} {ampm}"
+
+    m = re.search(r"\b(?P<h>0?[1-9]|1[0-2]):(?P<m>[0-5]\d)(?P<ampm>AM|PM)\b", compact, re.I)
+    if m:
+        hh = int(m.group("h"))
+        mm = int(m.group("m"))
+        ampm = m.group("ampm").upper()
+        return f"{hh:02d}:{mm:02d} {ampm}"
+
+    m = re.search(r"\b(?P<h>[01]?\d|2[0-3]):(?P<m>[0-5]\d)(?::[0-5]\d)?\b", compact)
+    if m:
+        hour24 = int(m.group("h"))
+        minute = int(m.group("m"))
+        ampm = "AM" if hour24 < 12 else "PM"
+        hour12 = hour24 % 12
+        if hour12 == 0:
+            hour12 = 12
+        return f"{hour12:02d}:{minute:02d} {ampm}"
+
+    return ""
+
+
+def format_ocr_output(payload: object) -> dict:
+    """
+    Normalize OCR output into strict, UI-ready formats.
+
+    - amount: float (or None)
+    - date: DD/MM/YYYY (or "")
+    - time: HH:MM AM/PM (or "")
+    """
+    if not isinstance(payload, dict):
+        return {}
+
+    out = dict(payload)
+
+    out["amount"] = clean_amount_to_float(out.get("amount"))
+    if out["amount"] is not None:
+        out["amount"] = float(out["amount"])
+
+    out["date"] = _format_ocr_date(out.get("date"))
+    out["time"] = _format_ocr_time(out.get("time"))
+
+    for key in ("sender", "receiver", "transaction_id", "category"):
+        if isinstance(out.get(key), str):
+            out[key] = out[key].strip()
+
+    return out
 
 # Authentication dependency
 def get_current_user(authorization: str = Header(...)):
@@ -575,10 +683,14 @@ async def upload(
                         "status": err.message,
                     }
 
-                # Normalize "Not found" to nulls so the frontend can prompt manual fixes.
-                for key in ("amount", "date", "time"):
-                    if extracted.get(key) in (None, "Not found"):
-                        extracted[key] = None
+                extracted = format_ocr_output(extracted)
+
+                # Normalize any lingering sentinel values so the frontend can prompt manual fixes.
+                if extracted.get("amount") == "Not found":
+                    extracted["amount"] = None
+                for key in ("date", "time"):
+                    if extracted.get(key) == "Not found":
+                        extracted[key] = ""
 
                 is_manual_fix_required = any(extracted.get(k) in (None, "") for k in ("amount", "date", "time"))
 
@@ -1043,42 +1155,32 @@ def get_spending_patterns_endpoint(current_user: dict = Depends(get_current_user
 def get_user_spending_patterns(current_user: dict = Depends(get_current_user)):
     """Spending patterns formatted for frontend consumption."""
     try:
-        df = load_and_clean_data(current_user["id"])
+        transactions = get_user_transactions(current_user["id"]) or []
+        if not transactions:
+            return {
+                "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+                "category_distribution": [],
+                "monthly_trend": [],
+                "has_data": False,
+            }
+
+        df = pd.DataFrame(transactions)
         patterns = get_spending_patterns(df)
-        if patterns.get("status") != "ok":
-            return patterns
-
-        df_local = df.copy()
-        df_local["weekday"] = df_local["datetime"].dt.weekday
-        weekend_total = float(df_local.loc[df_local["weekday"].isin([5, 6]), "amount"].sum())
-        weekday_total = float(df_local.loc[~df_local["weekday"].isin([5, 6]), "amount"].sum())
-        total_spent = float(df_local["amount"].sum())
-
-        patterns["weekend_vs_weekday"] = {
-            "weekend_total": round(weekend_total, 2),
-            "weekday_total": round(weekday_total, 2),
-            "weekend_share": round((weekend_total / total_spent) * 100, 2) if total_spent else 0.0,
+        # Ensure the API contract always has the expected keys.
+        return {
+            "weekend_vs_weekday": patterns.get("weekend_vs_weekday", {"weekend": 0, "weekday": 0}),
+            "category_distribution": patterns.get("category_distribution", []),
+            "monthly_trend": patterns.get("monthly_trend", []),
+            "has_data": bool(patterns.get("has_data")),
         }
-
-        distribution = (
-            df_local.groupby("category")["amount"]
-            .sum()
-            .sort_values(ascending=False)
-        )
-        category_distribution = []
-        for category, amount in distribution.items():
-            amt = float(amount or 0.0)
-            category_distribution.append({
-                "category": str(category),
-                "amount": round(amt, 2),
-                "percent": round((amt / total_spent) * 100, 2) if total_spent else 0.0,
-            })
-        patterns["category_distribution"] = category_distribution
-
-        return patterns
     except Exception as e:
         print(f"USER SPENDING PATTERNS ERROR: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch spending patterns")
+        return {
+            "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+            "category_distribution": [],
+            "monthly_trend": [],
+            "has_data": False,
+        }
 
 @app.get("/user/financial-stats")
 def get_financial_stats(current_user: dict = Depends(get_current_user)):

@@ -77,87 +77,109 @@ def get_top_n_merchants(df: pd.DataFrame, n: int = 5) -> List[Dict[str, Union[st
     return merchant_spending.to_dict('records')
 
 
-def get_spending_patterns(df: pd.DataFrame) -> Dict[str, Union[str, float, dict, list]]:
-    if df.empty:
+def get_spending_patterns(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Advanced Analytics schema (v2).
+
+    - Date normalization: `pd.to_datetime(..., dayfirst=True)` (drops invalid dates)
+    - Weekend vs weekday: totals for Sat/Sun vs Mon-Fri
+    - Category distribution: list of {name, value}
+    - Monthly trend: daily totals for last 30 days (list of {date, value})
+
+    Returns a dict with:
+    {
+      "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+      "category_distribution": [],
+      "monthly_trend": [],
+      "has_data": bool
+    }
+    """
+    if df is None or df.empty:
         return {
-            "status": "empty",
-            "message": "No transactions available for pattern analysis."
+            "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+            "category_distribution": [],
+            "monthly_trend": [],
+            "has_data": False,
         }
 
-    df = df.copy()
-    df["date_only"] = df["datetime"].dt.date
-    total_spent = float(df["amount"].sum())
-    txn_count = int(len(df))
-    avg_txn = float(df["amount"].mean()) if txn_count else 0.0
+    local = df.copy()
 
-    date_min = df["date_only"].min()
-    date_max = df["date_only"].max()
-    day_span = max((date_max - date_min).days + 1, 1)
-    avg_daily = float(total_spent / day_span)
+    # Amount normalization (best-effort for legacy string amounts).
+    amount_series = local.get("amount")
+    if amount_series is None:
+        local["amount"] = 0.0
+    else:
+        if amount_series.dtype == object:
+            cleaned = (
+                amount_series.astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace(r"[^\d\.\-]", "", regex=True)
+            )
+            local["amount"] = pd.to_numeric(cleaned, errors="coerce").fillna(0.0).astype(float)
+        else:
+            local["amount"] = pd.to_numeric(amount_series, errors="coerce").fillna(0.0).astype(float)
 
-    category_spend = df.groupby("category")["amount"].sum().sort_values(ascending=False)
-    top_category = None
-    if not category_spend.empty:
-        name = category_spend.index[0]
-        amount = float(category_spend.iloc[0])
-        pct = round((amount / total_spent) * 100, 2) if total_spent else 0.0
-        top_category = {"name": name, "amount": amount, "percent": pct}
+    local["amount"] = local["amount"].clip(lower=0.0)
+    total_amount = float(local["amount"].sum())
 
-    merchant_spend = df.groupby("description")["amount"].sum().sort_values(ascending=False)
-    top_merchant = None
-    if not merchant_spend.empty:
-        top_merchant = {"name": merchant_spend.index[0], "amount": float(merchant_spend.iloc[0])}
+    # Date normalization: prefer 'date' (Supabase), fall back to 'datetime' (cleaned DF).
+    if "date" in local.columns:
+        parsed = pd.to_datetime(local["date"], dayfirst=True, errors="coerce")
+    elif "datetime" in local.columns:
+        parsed = pd.to_datetime(local["datetime"], errors="coerce")
+    else:
+        parsed = pd.Series([pd.NaT] * len(local))
 
-    weekday_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    df["weekday"] = df["datetime"].dt.weekday
-    day_spend = df.groupby("weekday")["amount"].sum()
-    busiest_day = None
-    if not day_spend.empty:
-        idx = int(day_spend.idxmax())
-        busiest_day = {"day": weekday_map[idx], "amount": float(day_spend.loc[idx])}
+    local["date_parsed"] = parsed
+    local = local.dropna(subset=["date_parsed"]).copy()
+    if local.empty:
+        return {
+            "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+            "category_distribution": [],
+            "monthly_trend": [],
+            "has_data": False,
+        }
 
-    weekend_mask = df["weekday"].isin([5, 6])
-    weekend_total = float(df.loc[weekend_mask, "amount"].sum())
-    weekday_total = float(df.loc[~weekend_mask, "amount"].sum())
-    weekend_share = round((weekend_total / total_spent) * 100, 2) if total_spent else 0.0
+    # If transactions exist but all amounts are 0, treat as no usable data (prevents empty charts).
+    if total_amount <= 0.0:
+        return {
+            "weekend_vs_weekday": {"weekend": 0, "weekday": 0},
+            "category_distribution": [],
+            "monthly_trend": [],
+            "has_data": False,
+        }
 
-    recurring = (
-        df.groupby("description")
-        .agg(count=("amount", "count"), total=("amount", "sum"))
-        .sort_values(["count", "total"], ascending=False)
-    )
-    recurring = recurring[recurring["count"] >= 3].head(5)
-    recurring_merchants = [
-        {"name": idx, "count": int(row["count"]), "total": float(row["total"])}
-        for idx, row in recurring.iterrows()
+    local["is_weekend"] = local["date_parsed"].dt.weekday >= 5
+
+    weekend_total = float(local.loc[local["is_weekend"], "amount"].sum())
+    weekday_total = float(local.loc[~local["is_weekend"], "amount"].sum())
+
+    # Category distribution.
+    if "category" not in local.columns:
+        local["category"] = "Others"
+    local["category"] = local["category"].astype(str).str.strip().replace({"": "Others"})
+    cat = local.groupby("category")["amount"].sum().sort_values(ascending=False)
+    category_distribution = [
+        {"name": str(name), "value": round(float(value or 0.0), 2)}
+        for name, value in cat.items()
+        if float(value or 0.0) > 0
     ]
 
-    # Month over month change (last two months)
-    df_month = df.set_index("datetime").sort_index()
-    monthly = df_month["amount"].resample("M").sum()
-    mom_change = None
-    if len(monthly) >= 2:
-        last = float(monthly.iloc[-1])
-        prev = float(monthly.iloc[-2])
-        diff = last - prev
-        pct = round((diff / prev) * 100, 2) if prev else 0.0
-        mom_change = {"current": last, "previous": prev, "diff": diff, "percent": pct}
+    # Monthly (30-day) trend: daily totals for last 30 days up to the most recent date.
+    end = local["date_parsed"].max().normalize()
+    start = end - pd.Timedelta(days=29)
+    window = local[(local["date_parsed"] >= start) & (local["date_parsed"] <= end)].copy()
+    window["day"] = window["date_parsed"].dt.normalize()
+    daily = window.groupby("day")["amount"].sum()
+    date_index = pd.date_range(start=start, end=end, freq="D")
+    daily = daily.reindex(date_index, fill_value=0.0)
+    monthly_trend = [{"date": d.strftime("%d/%m/%Y"), "value": round(float(v or 0.0), 2)} for d, v in daily.items()]
 
     return {
-        "status": "ok",
-        "period": {"start": str(date_min), "end": str(date_max), "days": day_span},
-        "total_spent": total_spent,
-        "transaction_count": txn_count,
-        "avg_transaction": round(avg_txn, 2),
-        "avg_daily_spend": round(avg_daily, 2),
-        "top_category": top_category,
-        "top_merchant": top_merchant,
-        "busiest_day": busiest_day,
-        "weekend_share": weekend_share,
-        "weekday_total": weekday_total,
-        "weekend_total": weekend_total,
-        "recurring_merchants": recurring_merchants,
-        "month_over_month": mom_change
+        "weekend_vs_weekday": {"weekend": round(weekend_total, 2), "weekday": round(weekday_total, 2)},
+        "category_distribution": category_distribution,
+        "monthly_trend": monthly_trend,
+        "has_data": True,
     }
 
 

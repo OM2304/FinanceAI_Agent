@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatINR } from '../../lib/formatters';
+import { fetchSpendingPatterns } from '../../lib/api';
 import {
   ScatterChart,
   Scatter,
@@ -65,6 +66,11 @@ function parseTransactionDateTime(tx) {
 }
 
 function toFiniteAmount(value) {
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').replace(/[^\d.-]/g, '');
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
 }
@@ -165,6 +171,47 @@ function calendarCellStyle(value, maxDaily, isActiveDate) {
 }
 
 export default function AdvancedAnalytics({ expenses }) {
+  const [spendingPatterns, setSpendingPatterns] = useState(null);
+  const [spendingPatternsError, setSpendingPatternsError] = useState('');
+  const [spendingPatternsLoading, setSpendingPatternsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const token = localStorage.getItem('sb-token');
+        if (!token) {
+          if (!isMounted) return;
+          setSpendingPatterns({
+            weekend_vs_weekday: { weekend: 0, weekday: 0 },
+            category_distribution: [],
+            monthly_trend: [],
+            has_data: false,
+          });
+          setSpendingPatternsLoading(false);
+          return;
+        }
+
+        setSpendingPatternsLoading(true);
+        setSpendingPatternsError('');
+        const res = await fetchSpendingPatterns(token);
+        if (!isMounted) return;
+        setSpendingPatterns(res);
+      } catch (err) {
+        if (!isMounted) return;
+        setSpendingPatternsError(err?.message || 'Failed to fetch spending patterns');
+        setSpendingPatterns(null);
+      } finally {
+        if (isMounted) setSpendingPatternsLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const receiverTotals = useMemo(() => {
     const totals = {};
     for (const tx of expenses ?? []) {
@@ -423,7 +470,7 @@ export default function AdvancedAnalytics({ expenses }) {
       </div>
 
       <PredictiveAnalytics showCoreCards={false} />
-      <SpendingPatterns />
+      <SpendingPatterns data={spendingPatterns} loading={spendingPatternsLoading} error={spendingPatternsError} />
     </div>
   );
 }
