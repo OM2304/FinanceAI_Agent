@@ -3,6 +3,14 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { confirmTransaction, uploadCsvTransactions } from '../../lib/api';
 import { createClient } from '../../lib/supabase/client';
+import {
+  formatDateDmy,
+  formatTime12h,
+  isValidDateDmy,
+  isValidTime12h,
+  normalizeTimeTo12hInput,
+  sanitizeDateDmyInput,
+} from '../../lib/datetime';
 
 export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { // <--- Receive Prop
   const [status, setStatus] = useState("idle");
@@ -25,15 +33,6 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
   const [csvResult, setCsvResult] = useState(null);
   const router = useRouter();
 
-  const normalizeDateInput = (value) => {
-    if (!value) return '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-    const match = value.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
-    if (!match) return value;
-    const [, dd, mm, yyyy] = match;
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
   const categories = [
     "Food",
     "Travel",
@@ -50,25 +49,6 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
     const firstDot = v.indexOf(".");
     if (firstDot === -1) return v;
     return v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, "");
-  };
-
-  const isValidTime = (value) => {
-    const raw = String(value || "").trim();
-    if (!raw) return false;
-    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)) return true;
-    if (/^(?:0?[1-9]|1[0-2]):[0-5]\d\s?(?:AM|PM)$/i.test(raw)) return true;
-    return false;
-  };
-
-  const isValidIsoDate = (iso) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return false;
-    const [yyyy, mm, dd] = iso.split("-").map((x) => Number(x));
-    const dt = new Date(yyyy, mm - 1, dd);
-    if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    dt.setHours(0, 0, 0, 0);
-    return dt.getTime() <= today.getTime();
   };
 
   const validateManualField = (field, value) => {
@@ -92,12 +72,13 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
     }
 
     if (field === "date") {
-      const iso = normalizeDateInput(String(v).trim());
-      if (!isValidIsoDate(iso)) return "Please enter a valid date.";
+      const raw = String(v).trim();
+      if (!isValidDateDmy(raw)) return "Use DD/MM/YYYY";
     }
 
     if (field === "time") {
-      if (!isValidTime(v)) return "Invalid time format.";
+      const raw = String(v).trim();
+      if (!isValidTime12h(raw)) return "Use HH:MM AM/PM";
     }
 
     if (field === "transaction_id") {
@@ -122,13 +103,9 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
 
     if (field === "amount") nextValue = sanitizeAmountInput(rawValue);
     if (field === "date") {
-      const cleaned = String(rawValue || "")
-        .replace(/[^\d/\-]/g, "")
-        .replace(/^[^\d]+/, "")
-        .slice(0, 10);
-      nextValue = normalizeDateInput(cleaned);
+      nextValue = sanitizeDateDmyInput(rawValue);
     }
-    if (field === "time") nextValue = String(rawValue || "").replace(/[^\d:\sAPMapm]/g, "").toUpperCase();
+    if (field === "time") nextValue = normalizeTimeTo12hInput(rawValue);
 
     const nextData = { ...manualData, [field]: nextValue };
     setManualData(nextData);
@@ -253,7 +230,7 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
       const payload = {
         ...manualData,
         amount: Number(manualData.amount || 0),
-        date: normalizeDateInput(manualData.date),
+        date: String(manualData.date || "").trim(),
         time: String(manualData.time || "").trim(),
       };
       if (!payload.amount || !payload.receiver) {
@@ -262,11 +239,10 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
         return;
       }
       if (!payload.date) {
-        payload.date = new Date().toISOString().slice(0, 10);
+        payload.date = formatDateDmy(new Date());
       }
       if (!payload.time) {
-        const now = new Date();
-        payload.time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        payload.time = formatTime12h(new Date());
       }
       await confirmTransaction(payload, token);
       setStatus("success");
@@ -380,7 +356,9 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
   const isManualInvalid =
     Object.keys(manualErrors || {}).length > 0 ||
     !String(manualData.receiver || "").trim() ||
-    !String(manualData.amount || "").trim();
+    !String(manualData.amount || "").trim() ||
+    !isValidDateDmy(manualData.date) ||
+    !isValidTime12h(manualData.time);
 
   return (
     <>
@@ -524,13 +502,13 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
             value={manualData.date}
             onChange={(e) => handleManualChange("date", e.target.value)}
             onBlur={(e) => handleManualChange("date", e.target.value)}
-            placeholder="Date (YYYY-MM-DD or DD-MM-YYYY)"
+            placeholder="Date (DD/MM/YYYY)"
             className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
               manualErrors.date ? "border-rose-500" : "border-slate-200"
             }`}
           />
           {manualErrors.date && <p className="text-[11px] text-rose-600">{manualErrors.date}</p>}
-          <p className="text-xs text-slate-500">Format: `YYYY-MM-DD` (preferred) or `DD-MM-YYYY`</p>
+          <p className="text-xs text-slate-500">Format: `DD/MM/YYYY`</p>
         </div>
         <div className="space-y-2">
           <input
@@ -538,13 +516,13 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
             value={manualData.time}
             onChange={(e) => handleManualChange("time", e.target.value)}
             onBlur={(e) => handleManualChange("time", e.target.value)}
-            placeholder="Time (HH:MM)"
+            placeholder="Time (HH:MM AM/PM)"
             className={`w-full rounded-2xl border bg-white px-3 py-2 text-sm ${
               manualErrors.time ? "border-rose-500" : "border-slate-200"
             }`}
           />
           {manualErrors.time && <p className="text-[11px] text-rose-600">{manualErrors.time}</p>}
-          <p className="text-xs text-slate-500">Format: `HH:MM` (24-hour)</p>
+          <p className="text-xs text-slate-500">Format: `HH:MM AM/PM`</p>
         </div>
         <div className="space-y-1">
           <input
@@ -566,10 +544,17 @@ export function UploadComponent({ onUploadSuccess, onRequestConfirmation }) { //
             type="button"
             onClick={() => {
               const now = new Date();
-              setManualData({
+              const nextData = {
                 ...manualData,
-                date: now.toISOString().slice(0, 10),
-                time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+                date: formatDateDmy(now),
+                time: formatTime12h(now),
+              };
+              setManualData(nextData);
+              setManualErrors((prev) => {
+                const updated = { ...(prev || {}) };
+                delete updated.date;
+                delete updated.time;
+                return updated;
               });
             }}
             className="w-full sm:w-auto bg-white text-slate-700 px-4 py-2 rounded-2xl border border-slate-200 hover:bg-slate-50"

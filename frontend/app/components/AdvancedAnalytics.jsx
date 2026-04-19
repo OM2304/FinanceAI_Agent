@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatINR } from '../../lib/formatters';
 import { fetchSpendingPatterns } from '../../lib/api';
+import { parseTransactionDateTime } from '../../lib/datetime';
 import {
   ScatterChart,
   Scatter,
@@ -17,53 +18,6 @@ import {
 } from 'recharts';
 import { SpendingPatterns } from './SpendingPatterns';
 import { PredictiveAnalytics } from './PredictiveAnalytics';
-
-function parseTransactionDateTime(tx) {
-  const dateRaw = String(tx?.date ?? '').trim();
-  const timeRaw = String(tx?.time ?? '').trim();
-
-  if (!dateRaw) return null;
-
-  let year;
-  let month;
-  let day;
-  const parts = dateRaw.split('-').map((p) => p.trim());
-  if (parts.length === 3) {
-    // Supports YYYY-MM-DD and DD-MM-YYYY.
-    if (parts[0].length === 4) {
-      year = Number(parts[0]);
-      month = Number(parts[1]);
-      day = Number(parts[2]);
-    } else if (parts[2].length === 4) {
-      day = Number(parts[0]);
-      month = Number(parts[1]);
-      year = Number(parts[2]);
-    }
-  }
-
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    const parsed = new Date(dateRaw);
-    if (Number.isNaN(parsed.getTime())) return null;
-    year = parsed.getFullYear();
-    month = parsed.getMonth() + 1;
-    day = parsed.getDate();
-  }
-
-  let hours = 0;
-  let minutes = 0;
-  if (timeRaw) {
-    const timeParts = timeRaw.split(':').map((p) => p.trim());
-    if (timeParts.length >= 2) {
-      const h = Number(timeParts[0]);
-      const m = Number(timeParts[1]);
-      hours = Number.isFinite(h) ? h : 0;
-      minutes = Number.isFinite(m) ? m : 0;
-    }
-  }
-
-  const asDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
-  return Number.isNaN(asDate.getTime()) ? null : asDate;
-}
 
 function toFiniteAmount(value) {
   if (typeof value === 'string') {

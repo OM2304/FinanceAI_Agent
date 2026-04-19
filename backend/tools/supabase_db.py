@@ -1,4 +1,5 @@
 import os
+import re
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -45,19 +46,38 @@ def save_transaction(user_id: str, transaction_data: dict) -> dict:
         from datetime import datetime
         date_value = datetime.now().strftime('%Y-%m-%d')  # PostgreSQL date format
     else:
-        # Convert DD-MM-YYYY to YYYY-MM-DD for PostgreSQL
-        try:
-            from datetime import datetime
-            date_obj = datetime.strptime(date_value, '%d-%m-%Y')
-            date_value = date_obj.strftime('%Y-%m-%d')
-        except ValueError:
-            # If conversion fails, use current date
-            from datetime import datetime
-            date_value = datetime.now().strftime('%Y-%m-%d')
+        raw_date = str(date_value).strip()
+        from datetime import datetime
+        if raw_date and re.match(r"^\d{4}-\d{2}-\d{2}$", raw_date):
+            date_value = raw_date
+        else:
+            parsed = None
+            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%m-%d-%Y"):
+                try:
+                    parsed = datetime.strptime(raw_date, fmt)
+                    break
+                except ValueError:
+                    continue
+            if not parsed:
+                raise ValueError(f"Invalid date format: {raw_date}.")
+            date_value = parsed.strftime('%Y-%m-%d')
     
     time_value = transaction_data.get("time")
     if time_value in ("Not found", "", None):
         time_value = None
+    else:
+        raw_time = str(time_value).strip()
+        from datetime import datetime
+        parsed = None
+        for fmt in ("%H:%M", "%H:%M:%S", "%I:%M %p"):
+            try:
+                parsed = datetime.strptime(raw_time.upper(), fmt)
+                break
+            except ValueError:
+                continue
+        if not parsed:
+            raise ValueError(f"Invalid time format: {raw_time}. Expected HH:MM or HH:MM AM/PM.")
+        time_value = parsed.strftime("%H:%M")
     
     receiver_value = transaction_data.get("receiver")
     if not receiver_value or receiver_value == "Not found":
@@ -140,7 +160,7 @@ def get_user_transactions(user_id: str) -> list:
         print(f"DEBUG: No transactions found for user {user_id}")
         return []
     
-    # Convert dates back to DD-MM-YYYY format for frontend
+    # Convert dates back to DD/MM/YYYY format for frontend
     transactions = []
     for tx in result.data:
         tx_copy = tx.copy()
@@ -148,9 +168,24 @@ def get_user_transactions(user_id: str) -> list:
             try:
                 from datetime import datetime
                 date_obj = datetime.strptime(tx_copy["date"], '%Y-%m-%d')
-                tx_copy["date"] = date_obj.strftime('%d-%m-%Y')
+                tx_copy["date"] = date_obj.strftime('%d/%m/%Y')
             except ValueError:
                 pass  # Keep original if conversion fails
+        if tx_copy.get("time"):
+            try:
+                from datetime import datetime
+                raw_time = str(tx_copy["time"]).strip()
+                parsed = None
+                for fmt in ("%H:%M", "%H:%M:%S", "%I:%M %p"):
+                    try:
+                        parsed = datetime.strptime(raw_time.upper(), fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed:
+                    tx_copy["time"] = parsed.strftime("%I:%M %p")
+            except Exception:
+                pass
         transactions.append(tx_copy)
     
     return transactions

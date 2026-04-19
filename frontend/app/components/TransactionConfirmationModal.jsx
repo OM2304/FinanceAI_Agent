@@ -2,6 +2,14 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Pencil } from 'lucide-react';
+import {
+  coerceToDateDmy,
+  coerceToTime12h,
+  isValidDateDmy,
+  isValidTime12h,
+  normalizeTimeTo12hInput,
+  sanitizeDateDmyInput,
+} from '../../lib/datetime';
 
 export function TransactionConfirmationModal({
   isOpen,
@@ -11,9 +19,6 @@ export function TransactionConfirmationModal({
   isSaving = false,
   errorMessage = ''
 }) {
-  const DATE_REGEX = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[012])\/(19|20)\d\d$/;
-  const TIME_REGEX = /^(0[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
-
   const normalizeExtractedData = (data) => {
     const src = data && typeof data === 'object' ? data : {};
     const lowered = {};
@@ -24,8 +29,8 @@ export function TransactionConfirmationModal({
     return {
       ...src,
       amount: lowered.amount ?? src.amount,
-      date: lowered.date ?? src.date,
-      time: lowered.time ?? src.time,
+      date: coerceToDateDmy(lowered.date ?? src.date),
+      time: coerceToTime12h(lowered.time ?? src.time),
       receiver: lowered.receiver ?? src.receiver,
       sender: lowered.sender ?? src.sender,
       category: lowered.category ?? src.category,
@@ -61,59 +66,6 @@ export function TransactionConfirmationModal({
 
   const isLowConfidence = (field) => getConfidence(field) < 0.7;
 
-  const sanitizeDateInput = (rawValue) => {
-    const digits = String(rawValue || '').replace(/\D/g, '').slice(0, 8);
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
-  };
-
-  const isValidDateDmy = (value) => {
-    const raw = String(value || '').trim();
-    if (!DATE_REGEX.test(raw)) return false;
-    const [dd, mm, yyyy] = value.split('/').map((part) => Number(part));
-    if (!dd || !mm || !yyyy) return false;
-    if (mm < 1 || mm > 12) return false;
-    if (dd < 1 || dd > 31) return false;
-    const dt = new Date(yyyy, mm - 1, dd);
-    return dt.getFullYear() === yyyy && dt.getMonth() === mm - 1 && dt.getDate() === dd;
-  };
-
-  const isValidTime = (value) => {
-    const raw = String(value || '').trim();
-    return TIME_REGEX.test(raw);
-  };
-
-  const normalizeTimeInput = (rawValue) => {
-    const raw = String(rawValue || '').trim();
-    if (!raw) return '';
-
-    const compact = raw.toUpperCase().replace(/\s+/g, '').replace('.', ':');
-
-    // 24-hour -> strict 12-hour.
-    let m = compact.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
-    if (m) {
-      const hour24 = Number(m[1]);
-      const minute = Number(m[2]);
-      const ampm = hour24 < 12 ? 'AM' : 'PM';
-      const hour12 = ((hour24 + 11) % 12) + 1;
-      return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${ampm}`;
-    }
-
-    // 12-hour variants -> strict 12-hour.
-    m = compact.match(/^(0?[1-9]|1[0-2]):([0-5]\d)(AM|PM)$/);
-    if (m) {
-      const hour = Number(m[1]);
-      const minute = Number(m[2]);
-      const ampm = m[3];
-      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${ampm}`;
-    }
-
-    // Best-effort: insert a space before AM/PM if missing.
-    const spaced = raw.toUpperCase().replace(/\s+/g, ' ').replace('.', ':').replace(/(\d)(AM|PM)\b/, '$1 $2');
-    return spaced;
-  };
-
   const validateFields = (field, value) => {
     const errors = {};
     const warns = {};
@@ -129,16 +81,14 @@ export function TransactionConfirmationModal({
 
     if (field === 'date') {
       const raw = String(value || '').trim();
-      if (raw && !isValidDateDmy(raw)) {
-        errors[field] = 'Use DD/MM/YYYY';
-      }
+      if (!raw) errors[field] = 'Use DD/MM/YYYY';
+      else if (!isValidDateDmy(raw)) errors[field] = 'Use DD/MM/YYYY';
     }
 
     if (field === 'time') {
       const raw = String(value || '').trim();
-      if (raw && !isValidTime(raw)) {
-        errors[field] = 'Use HH:MM AM/PM';
-      }
+      if (!raw) errors[field] = 'Use HH:MM AM/PM';
+      else if (!isValidTime12h(raw)) errors[field] = 'Use HH:MM AM/PM';
     }
 
     if (field === 'sender' || field === 'receiver') {
@@ -161,9 +111,9 @@ export function TransactionConfirmationModal({
   const handleInputChange = (field, value, { validate = true } = {}) => {
     const nextValue =
       field === 'date'
-        ? sanitizeDateInput(value)
+        ? sanitizeDateDmyInput(value)
         : field === 'time'
-          ? normalizeTimeInput(value)
+          ? normalizeTimeTo12hInput(value)
           : field === 'amount'
             ? String(value || '').replace(/,/g, '').replace(/[^\d.\-]/g, '')
             : value;
@@ -213,7 +163,7 @@ export function TransactionConfirmationModal({
     const trimmed = String(rawValue || '').trim();
     const isDateOrTime = field === 'date' || field === 'time';
     const isValid =
-      field === 'date' ? isValidDateDmy(trimmed) : field === 'time' ? isValidTime(trimmed) : true;
+      field === 'date' ? isValidDateDmy(trimmed) : field === 'time' ? isValidTime12h(trimmed) : true;
 
     const borderClass =
       isDateOrTime && trimmed
@@ -276,7 +226,7 @@ export function TransactionConfirmationModal({
   const amountValue = Number(editedData?.amount);
   const isAmountValid = Number.isFinite(amountValue) && amountValue > 0;
   const isDateValid = isValidDateDmy(editedData?.date);
-  const isTimeValid = isValidTime(editedData?.time);
+  const isTimeValid = isValidTime12h(editedData?.time);
 
   const isConfirmDisabled =
     isSaving || !isAmountValid || !isDateValid || !isTimeValid || !String(editedData?.category || '').trim();

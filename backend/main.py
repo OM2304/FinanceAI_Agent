@@ -775,6 +775,24 @@ async def upload(
 async def confirm_transaction(data: dict, current_user: dict = Depends(get_current_user)):
     """Save a confirmed transaction after user review"""
     try:
+        date_str = data.get("date")
+        if date_str not in (None, "", "Not found"):
+            try:
+                parsed_date = datetime.strptime(str(date_str).strip(), "%d/%m/%Y").date()
+                if parsed_date > date.today():
+                    raise HTTPException(status_code=400, detail="date must not be in the future")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=400, detail="date must be in DD/MM/YYYY format")
+
+        time_str = data.get("time")
+        if time_str not in (None, "", "Not found"):
+            try:
+                datetime.strptime(str(time_str).strip().upper(), "%I:%M %p")
+            except Exception:
+                raise HTTPException(status_code=400, detail="time must be in HH:MM AM/PM format")
+
         try:
             tx = TransactionConfirmModel.parse_obj(data)
         except Exception as e:
