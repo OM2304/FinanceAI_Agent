@@ -308,16 +308,7 @@ Markdown
 
 AI-powered personal finance console with a professional **Advanced Analytics dashboard** and an **Export Engine** for accountant-ready reporting. Ingest expenses from receipts, statements, and CSVs, then explore predictive insights, scenario planning, anomaly flags, budgets, and a multi-guru advisor.
 
-## Analysis of the Previous README (What Changed)
 
-The previous README described ingestion, charts, and advisor features well, but it didn’t showcase the two big “professional polish” additions you’ve built:
-
-- **Advanced Analytics Dashboard**: predictive burn/runway metrics, strategic widgets (merchant concentration + category growth), what‑if simulation with 6‑month impact, and anomaly detection using Z‑Scores.
-- **Automated Financial Reporting**: a printable “Financial Statement” PDF export and an accountant-ready CSV export with extra flags/remarks.
-- **API surface**: predictive insights endpoint (`GET /insights/predictive`) was missing.
-- **Clarity**: environment variables had duplicated blocks and setup can be simpler (`pip install -r requirements.txt`).
-
-This README is rewritten to highlight those capabilities in a clarity-first structure.
 
 ## Core Feature: Advanced Analytics Dashboard
 
